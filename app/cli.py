@@ -1,5 +1,3 @@
-"""CLI for triage-voice. Record -> STT -> triage -> print."""
-
 import argparse
 import os
 from pathlib import Path
@@ -29,7 +27,6 @@ TEST_TRANSCRIPTS = [
 
 
 def record_audio(path: str = "test.wav", seconds: int = 6) -> None:
-    """Record mic to WAV file. Requires sounddevice, soundfile, numpy."""
     import numpy as np
     import sounddevice as sd
     import soundfile as sf
@@ -44,7 +41,6 @@ def record_audio(path: str = "test.wav", seconds: int = 6) -> None:
 
 
 def transcribe_wav(wav_path: str) -> str:
-    """Transcribe WAV file with ElevenLabs scribe_v2. Returns transcript text."""
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
         raise RuntimeError("Missing ELEVENLABS_API_KEY. Put it in .env")
@@ -61,8 +57,7 @@ def transcribe_wav(wav_path: str) -> str:
     return getattr(transcription, "text", None) or str(transcription)
 
 
-def print_result(result: TriageResult) -> None:
-    """Print triage result to console."""
+def print_result(result: TriageResult) -> None: 
     print("\n--- CHECKPOINT C: TRIAGE RESULT ---")
     print(f"ESI Level: {result.esi_level}")
     print(f"Red flags: {result.red_flags if result.red_flags else '(none)'}")
@@ -72,7 +67,6 @@ def print_result(result: TriageResult) -> None:
 
 
 def run_test_harness() -> None:
-    """Run triage on hardcoded transcripts. No mic, no API."""
     for i, transcript in enumerate(TEST_TRANSCRIPTS, 1):
         print(f"\n{'='*60}")
         print(f"TEST {i}/{len(TEST_TRANSCRIPTS)}")
@@ -82,7 +76,6 @@ def run_test_harness() -> None:
 
 
 def run_full(record_first: bool, wav_path: str) -> None:
-    """Record (optional) -> transcribe -> triage -> print."""
     if record_first:
         record_audio(wav_path)
     if not Path(wav_path).exists():
@@ -105,7 +98,6 @@ def run_full(record_first: bool, wav_path: str) -> None:
 
 
 def run_voicemail(audio_path: str) -> None:
-    """Single-shot voicemail-style triage on a prerecorded audio file."""
     path = Path(audio_path)
     if not path.exists():
         print(f"Error: {audio_path} not found.")
@@ -130,7 +122,6 @@ def run_voicemail(audio_path: str) -> None:
 
 
 def run_dry_run() -> None:
-    """Manual transcript entry for debugging triage logic (no audio, no STT)."""
     print("--- DRY-RUN TRIAGE ---")
     transcript = input("Paste transcript text (single line) for triage: ").strip()
     print("\n--- TRANSCRIPT ---")

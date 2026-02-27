@@ -1,23 +1,47 @@
-"""Rules-based ESI triage engine. Pure functions, no IO."""
+"""Rules-based ESI triage engine following 4-step ESI algorithm. Pure functions, no IO."""
 
 import re
-from typing import Optional
+from typing import List, Tuple
 
 from app.schemas import TriageResult
 
-# ESI 1: Life-threatening. Immediate resuscitation.
-# Pattern -> human-readable flag for output
-ESI_1_PATTERNS: list[tuple[str, str]] = [
+# =============================================================================
+# ESI 1: Life-threatening - Immediate resuscitation required
+# =============================================================================
+
+ESI_1_PATTERNS: List[Tuple[str, str]] = [
     (r"\bnot\s+breathing\b", "not breathing"),
     (r"\bstopped\s+breathing\b", "stopped breathing"),
     (r"\bunresponsive\b", "unresponsive"),
     (r"\bcpr\b", "CPR"),
     (r"\bno\s+pulse\b", "no pulse"),
     (r"\bcardiac\s+arrest\b", "cardiac arrest"),
+    (r"\bgasping\b", "gasping"),
+    (r"\bcyanosis\b", "cyanosis"),
+    (r"\bblue\s+lips\b", "blue lips"),
+    (r"\bairway\s+swell", "airway swelling"),
+    (r"\bsevere\s+respiratory\s+distress\b", "severe respiratory distress"),
+    (r"\bmassive\s+bleed", "massive bleeding"),
+    (r"\bspurting\s+blood\b", "spurting blood"),
+    (r"\bchoking\b", "choking"),
 ]
 
-# ESI 2: High acuity. Needs urgent evaluation.
-ESI_2_PATTERNS: list[tuple[str, str]] = [
+ACTIVE_SEIZURE_INDICATORS = [
+    r"\bright\s+now\b",
+    r"\bcurrently\b",
+    r"\bstill\b",
+    r"\bactively\b",
+    r"\bwon'?t\s+stop\b",
+    r"\bhaving\s+a\s+seizure\b",
+    r"\bseizing\s+now\b",
+]
+
+# =============================================================================
+# ESI 2: High-risk situations, altered mental status, severe distress
+# =============================================================================
+
+ESI_2_PATTERNS: List[Tuple[str, str]] = [
+    # Existing patterns
     (r"\bchest\s+pain\b", "chest pain"),
     (r"\bcan'?t\s+breathe\b", "can't breathe"),
     (r"\bcannot\s+breathe\b", "can't breathe"),
@@ -25,9 +49,6 @@ ESI_2_PATTERNS: list[tuple[str, str]] = [
     (r"\bsevere\s+bleeding\b", "severe bleeding"),
     (r"\bheavy\s+bleeding\b", "severe bleeding"),
     (r"\boverdose\b", "overdose"),
-    (r"\bsuicidal\b", "suicidal"),
-    (r"\bwant\s+to\s+die\b", "suicidal ideation"),
-    (r"\bseizure\b", "seizure"),
     (r"\bstroke\b", "stroke"),
     (r"\bpassed\s+out\b", "passed out"),
     (r"\bfainted\b", "fainted"),
@@ -35,56 +56,102 @@ ESI_2_PATTERNS: list[tuple[str, str]] = [
     (r"\bhead\s+trauma\b", "head injury"),
     (r"\bsevere\s+allergic\s+reaction\b", "severe allergic reaction"),
     (r"\banaphylax", "anaphylaxis"),
-    (r"\bchoking\b", "choking"),
+    # Neurologic/stroke symptoms
+    (r"\bface\s+droop", "face droop"),
+    (r"\bslurred\s+speech\b", "slurred speech"),
+    (r"\bone[- ]?sided\s+weakness\b", "one-sided weakness"),
+    (r"\bsudden\s+vision\s+loss\b", "sudden vision loss"),
+    # Altered mental status
+    (r"\bconfused\b", "confused"),
+    (r"\bnot\s+making\s+sense\b", "altered mental status"),
+    (r"\blethargic\b", "lethargic"),
+    (r"\bdifficult\s+to\s+wake\b", "difficult to wake"),
+    # Psychiatric crisis
+    (r"\bsuicidal\b", "suicidal"),
+    (r"\bwant\s+to\s+(?:die|kill\s+myself)\b", "suicidal ideation"),
+    (r"\boverdose\s+attempt\b", "overdose attempt"),
+    # Severe asthma
+    (r"\binhaler\s+not\s+help", "inhaler not helping"),
+    (r"\bsevere\s+wheez", "severe wheezing"),
+    # Non-active seizure (history or general mention)
+    (r"\bseizure\b", "seizure"),
+    # Not feeding (pediatric)
+    (r"\bnot\s+feeding\b", "not feeding"),
+    (r"\binconsolable\b", "inconsolable crying"),
 ]
 
-# Pain scale: severe (9-10) -> ESI 2
+PEDIATRIC_UNDER_3MO_PATTERNS = [
+    r"\bnewborn\b",
+    r"\bunder\s+3\s+months?\b",
+    r"\b(?:2|two)\s+weeks?\s+old\b",
+    r"\b(?:6|six)\s+weeks?\s+old\b",
+    r"\b(?:1|one)\s+month\s+old\b",
+    r"\b(?:2|two)\s+months?\s+old\b",
+    r"\b(?:1|one)\s+week\s+old\b",
+]
+
+# =============================================================================
+# Pain/Distress patterns for severity backstop
+# =============================================================================
+
 SEVERE_PAIN_PATTERN = re.compile(
     r"(?:pain|hurt)\s*(?:is\s*)?(?:9|10)\s*(?:out\s+of\s+10|/\s*10)|"
     r"(?:9|10)\s*(?:out\s+of\s+10|/\s*10)\s*(?:pain|hurt)|"
     r"\bsevere\s+pain\b"
 )
 
-# Pain scale: moderate (5-8) -> ESI 3
 MODERATE_PAIN_PATTERN = re.compile(
     r"(?:pain|hurt)\s*(?:is\s*)?[5-8]\s*(?:out\s+of\s+10|/\s*10)|"
     r"[5-8]\s*(?:out\s+of\s+10|/\s*10)\s*(?:pain|hurt)|"
     r"\bmoderate\s+(?:pain|headache)\b"
 )
 
-# Mild pain (1-4) -> ESI 4
 MILD_PAIN_PATTERN = re.compile(
     r"(?:pain|hurt)\s*(?:is\s*)?[1-4]\s*(?:out\s+of\s+10|/\s*10)|"
     r"[1-4]\s*(?:out\s+of\s+10|/\s*10)\s*(?:pain|hurt)|"
     r"\bmild\s+(?:pain|headache|stomach)\b"
 )
 
-# High fever 104+ -> ESI 2
+SEVERE_DISTRESS_PATTERN = re.compile(r"\bsevere\s+distress\b")
+
 HIGH_FEVER_PATTERN = re.compile(
     r"10[4-9]\s*(?:degree|°|F)|1[1-2][0-9]\s*(?:degree|°|F)|"
     r"fever\s+(?:of\s+)?10[4-9]|(?:very\s+)?high\s+fever"
 )
 
-# Fever (general) -> ESI 3
-FEVER_PATTERN = re.compile(r"\bfever\b|\b101\s+(?:degree|°)|102|103")
+# =============================================================================
+# Resource estimation patterns (Step 3)
+# =============================================================================
 
-# Other ESI 3 indicators: (pattern, label for logging)
-ESI_3_INDICATORS: list[tuple[str, str]] = [
-    (r"\bvomit(?:ing)?\b", "vomiting"),
-    (r"\bthrew\s+up\b", "vomiting"),
-    (r"\binjur(?:y|ies)\b", "injury"),
-    (r"\bcut\b", "cut"),
-    (r"\bbruise\b", "bruise"),
-    (r"\bswollen\b", "swelling"),
-    (r"\bdizzy\b", "dizziness"),
-    (r"\bdizziness\b", "dizziness"),
+TWO_PLUS_RESOURCES = [
+    (r"\bchest\s+pain\b", "chest pain"),
+    (r"\babdominal\s+pain\b", "abdominal pain"),
+    (r"\bfracture\b", "fracture"),
+    (r"\bhead\s+injury\b", "head injury"),
+    (r"\bsevere\s+infection\b", "severe infection"),
+    (r"\bkidney\s+stone\b", "kidney stone"),
+    (r"\bsevere\s+dehydration\b", "severe dehydration"),
+    (r"\bappendic", "possible appendicitis"),
+    (r"\bpneumonia\b", "pneumonia"),
+    (r"\bbroken\s+bone\b", "broken bone"),
 ]
 
-# ESI 4/5: minor
-ESI_4_INDICATORS = [
-    r"\bsmall\s+cut\b",
-    r"\bminor\b",
-    r"\bslight\b",
+ONE_RESOURCE = [
+    (r"\blaceration\b", "laceration"),
+    (r"\bsimple\s+wound\b", "simple wound"),
+    (r"\bsprain(?:ed)?\b", "sprain"),
+    (r"\buti\b|\burinary\s+tract\b", "UTI symptoms"),
+    (r"\bear\s+infection\b", "ear infection"),
+    (r"\bstitches\b", "needs stitches"),
+    (r"\bx-?ray\b", "needs x-ray"),
+]
+
+ZERO_RESOURCES = [
+    (r"\bmedication\s+refill\b", "medication refill"),
+    (r"\bmild\s+cold\b", "mild cold"),
+    (r"\bminor\s+rash\b", "minor rash"),
+    (r"\bsimple\s+sore\s+throat\b", "simple sore throat"),
+    (r"\bprescription\s+refill\b", "prescription refill"),
 ]
 
 
@@ -93,74 +160,160 @@ def _normalize(text: str) -> str:
     return (text or "").strip().lower()
 
 
-def _find_red_flags(text: str) -> list[tuple[int, str]]:
-    """Return [(level, flag), ...] for any matched red flags. Level 1 overrides all."""
+def _check_active_seizure(text: str) -> bool:
+    """Check if transcript indicates an ACTIVE seizure happening now."""
+    text_norm = _normalize(text)
+    has_seizure = bool(re.search(r"\bseiz(?:ure|ing)\b", text_norm, re.I))
+    if not has_seizure:
+        return False
+    for indicator in ACTIVE_SEIZURE_INDICATORS:
+        if re.search(indicator, text_norm, re.I):
+            return True
+    return False
+
+
+def _check_pediatric_fever(text: str) -> bool:
+    """Check if transcript indicates infant <3 months with fever."""
+    text_norm = _normalize(text)
+    has_fever = bool(re.search(r"\bfever\b", text_norm, re.I))
+    if not has_fever:
+        return False
+    for pattern in PEDIATRIC_UNDER_3MO_PATTERNS:
+        if re.search(pattern, text_norm, re.I):
+            return True
+    return False
+
+
+def _check_esi_1(text: str) -> List[str]:
+    """
+    STEP 1: Check for immediate life-threatening conditions requiring resuscitation.
+    Returns list of matched flags if ESI 1, empty list otherwise.
+    """
     text_norm = _normalize(text)
     if not text_norm:
         return []
 
-    found: list[tuple[int, str]] = []
+    flags: List[str] = []
+
+    if _check_active_seizure(text):
+        flags.append("active seizure")
 
     for pattern, flag in ESI_1_PATTERNS:
         if re.search(pattern, text_norm, re.I):
-            found.append((1, flag))
+            flags.append(flag)
 
-    for pattern, flag in ESI_2_PATTERNS:
-        if re.search(pattern, text_norm, re.I):
-            found.append((2, flag))
-
-    return found
+    return list(dict.fromkeys(flags))
 
 
-def _apply_heuristics(text: str) -> tuple[int, list[str]]:
+def _check_esi_2(text: str) -> List[str]:
     """
-    Apply severity heuristics when no red flags. Returns (esi_level, matched_indicators).
-    Conservative: when unclear, assign more urgent (lower number).
+    STEP 2: Check for high-risk situations, altered mental status, severe distress.
+    Returns list of matched flags if ESI 2, empty list otherwise.
     """
     text_norm = _normalize(text)
     if not text_norm:
-        return 5, []  # Unclear -> conservative ESI 5
+        return []
 
-    indicators: list[str] = []
+    flags: List[str] = []
 
-    # ESI 2 heuristics
-    if SEVERE_PAIN_PATTERN.search(text_norm):
-        indicators.append("severe pain")
-        return 2, indicators
+    if _check_pediatric_fever(text):
+        flags.append("infant <3mo with fever")
+
     if HIGH_FEVER_PATTERN.search(text_norm):
-        indicators.append("high fever")
-        return 2, indicators
+        flags.append("high fever")
 
-        # ESI 3 heuristics
-    if MODERATE_PAIN_PATTERN.search(text_norm):
-        indicators.append("moderate pain")
-        return 3, indicators
-    if FEVER_PATTERN.search(text_norm):
-        indicators.append("fever")
-        return 3, indicators
+    for pattern, flag in ESI_2_PATTERNS:
+        if re.search(pattern, text_norm, re.I):
+            if flag in ("seizure", "seizing") and _check_active_seizure(text):
+                continue
+            flags.append(flag)
 
-    # --- OPTION 3 OVERRIDE ---
-    if re.search(r"\b(?:small|minor|tiny)\s+cut\b", text_norm):
-        return 4, ["small/minor cut"]
+    return list(dict.fromkeys(flags))
 
-    for pat, label in ESI_3_INDICATORS:
-        if re.search(pat, text_norm):
+
+def _has_modifier(text: str, keyword: str, modifier: str) -> bool:
+    """Check if a modifier appears near a keyword (within ~30 chars)."""
+    text_norm = _normalize(text)
+    keyword_match = re.search(keyword, text_norm, re.I)
+    if not keyword_match:
+        return False
+    start = max(0, keyword_match.start() - 30)
+    end = min(len(text_norm), keyword_match.end() + 30)
+    context = text_norm[start:end]
+    return bool(re.search(rf"\b{modifier}\b", context, re.I))
+
+
+def estimate_resources(text: str) -> Tuple[int, List[str]]:
+    """
+    STEP 3: Estimate expected resource utilization.
+    Returns (resource_count, matched_indicators).
+    Applies mild/severe modifiers with conservative bias.
+    """
+    text_norm = _normalize(text)
+    if not text_norm:
+        return 0, []
+
+    indicators: List[str] = []
+    base_count = 0
+
+    for pattern, label in TWO_PLUS_RESOURCES:
+        if re.search(pattern, text_norm, re.I):
             indicators.append(label)
-            return 3, indicators
-            
-    # ESI 4 heuristics
-    if MILD_PAIN_PATTERN.search(text_norm):
-        indicators.append("mild pain")
-        return 4, indicators
-    for pat in ESI_4_INDICATORS:
-        if re.search(pat, text_norm):
-            return 4, ["minor symptoms"]
+            if _has_modifier(text_norm, pattern, "mild"):
+                base_count = max(base_count, 1)
+            else:
+                base_count = 2
+            break
 
-    # ESI 5: unclear or very mild. Conservative -> treat as low acuity but still recommend
-    return 5, []
+    if base_count == 0:
+        for pattern, label in ONE_RESOURCE:
+            if re.search(pattern, text_norm, re.I):
+                indicators.append(label)
+                if _has_modifier(text_norm, pattern, "severe"):
+                    base_count = 2
+                else:
+                    base_count = 1
+                break
+
+    if base_count == 0:
+        for pattern, label in ZERO_RESOURCES:
+            if re.search(pattern, text_norm, re.I):
+                indicators.append(label)
+                base_count = 0
+                break
+
+    if re.search(r"\bsevere\b", text_norm, re.I) and base_count < 2:
+        base_count = min(base_count + 1, 2)
+
+    return base_count, indicators
 
 
-def _build_summary(transcript: str, esi: int, red_flags: list[str]) -> str:
+def _apply_severity_backstop(text: str, current_esi: int) -> Tuple[int, List[str]]:
+    """
+    Apply severity backstop after resource-based ESI assignment.
+    Prevents high pain from becoming low-acuity ESI.
+    """
+    text_norm = _normalize(text)
+    flags: List[str] = []
+    esi = current_esi
+
+    if SEVERE_DISTRESS_PATTERN.search(text_norm):
+        if esi > 2:
+            esi = 2
+            flags.append("severe distress")
+    elif SEVERE_PAIN_PATTERN.search(text_norm):
+        if esi > 3:
+            esi = 3
+            flags.append("severe pain")
+    elif MODERATE_PAIN_PATTERN.search(text_norm):
+        if esi > 3:
+            esi = 3
+            flags.append("moderate pain")
+
+    return esi, flags
+
+
+def _build_summary(transcript: str, esi: int, red_flags: List[str]) -> str:
     """One or two sentences summarizing the assessment."""
     transcript = (transcript or "").strip()
     if not transcript:
@@ -173,7 +326,6 @@ def _build_summary(transcript: str, esi: int, red_flags: list[str]) -> str:
     if red_flags:
         parts.append(", ".join(red_flags))
     else:
-        # Truncate long transcript for summary
         snippet = transcript[:100] + "..." if len(transcript) > 100 else transcript
         parts.append(snippet)
 
@@ -191,34 +343,60 @@ def _build_recommended_action(esi: int) -> str:
         return "Consider seeking urgent care or an emergency department."
     if esi == 4:
         return "Consider calling your doctor or visiting an urgent care when convenient."
-    # esi 5
     return "Consider describing your symptoms to a healthcare provider when you can."
 
 
 def triage_from_transcript(transcript: str) -> TriageResult:
     """
-    Run rules-based ESI triage on transcript text.
+    Run 4-step ESI triage algorithm on transcript text.
+    
+    STEP 1: Immediate life-saving intervention required? -> ESI 1
+    STEP 2: High-risk situation, altered mental status, or severe distress? -> ESI 2
+    STEP 3: Estimate expected resource utilization
+    STEP 4: Assign ESI 3/4/5 based on predicted resource count
+    
     Returns a TriageResult. Pure function, no IO.
     """
     text = _normalize(transcript or "")
-    red_flag_list = _find_red_flags(transcript or "")
 
-    if red_flag_list:
-        # Any ESI 1 -> return 1; else ESI 2
-        levels = [level for level, _ in red_flag_list]
-        flags = [flag for _, flag in red_flag_list]
-        esi = 1 if 1 in levels else 2
-        red_flags = list(dict.fromkeys(flags))  # dedupe, preserve order
+    # STEP 1: Life-threatening -> ESI 1
+    esi1_flags = _check_esi_1(text)
+    if esi1_flags:
+        return TriageResult(
+            esi_level=1,
+            red_flags=esi1_flags,
+            summary=_build_summary(transcript, 1, esi1_flags),
+            recommended_action=_build_recommended_action(1),
+        )
+
+    # STEP 2: High-risk -> ESI 2
+    esi2_flags = _check_esi_2(text)
+    if esi2_flags:
+        return TriageResult(
+            esi_level=2,
+            red_flags=esi2_flags,
+            summary=_build_summary(transcript, 2, esi2_flags),
+            recommended_action=_build_recommended_action(2),
+        )
+
+    # STEP 3: Estimate resources
+    resource_count, resource_indicators = estimate_resources(text)
+
+    # STEP 4: Assign ESI 3/4/5 based on resources
+    if resource_count >= 2:
+        esi = 3
+    elif resource_count == 1:
+        esi = 4
     else:
-        esi, _ = _apply_heuristics(transcript or "")
-        red_flags = []
+        esi = 5
 
-    summary = _build_summary(transcript or "", esi, red_flags)
-    recommended_action = _build_recommended_action(esi)
+    # Apply severity backstop
+    esi, backstop_flags = _apply_severity_backstop(text, esi)
+    all_flags = resource_indicators + backstop_flags
 
     return TriageResult(
         esi_level=esi,
-        red_flags=red_flags,
-        summary=summary,
-        recommended_action=recommended_action,
+        red_flags=list(dict.fromkeys(all_flags)),
+        summary=_build_summary(transcript, esi, all_flags),
+        recommended_action=_build_recommended_action(esi),
     )

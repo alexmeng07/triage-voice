@@ -68,26 +68,35 @@ def missing_info_hints(text: str) -> List[str]:
     hints: List[str] = []
     text_norm = (text or "").lower()
 
-    # Age: look for patterns like "54 years old", "54 yo", or "age 54".
+    # Age: look for patterns like "54 years old", "54 yo", "age 54", or "Age: 54" (from case_to_note).
+    # Also check for "Age: unknown" which means it was explicitly marked as unknown.
     age_pattern = re.compile(
-        r"\b\d{1,3}\s*(?:years?\s*old|yo)\b|\bage\s*\d{1,3}\b"
+        r"\b\d{1,3}\s*(?:years?\s*old|yo)\b"
+        r"|\bage[:\s]+\d{1,3}\b"
     )
-    if not age_pattern.search(text_norm):
+    age_unknown_pattern = re.compile(r"\bage[:\s]+unknown\b")
+    if not age_pattern.search(text_norm) and not age_unknown_pattern.search(text_norm):
         hints.append("Age not mentioned.")
 
-    # Severity: look for 0-10 style or descriptive words.
+    # Severity: look for 0-10 style, descriptive words, or "Severity: N/10" (from case_to_note).
+    # Also check for "Severity: unknown" which means it was explicitly marked as unknown.
     severity_pattern = re.compile(
-        r"\b(?:pain|severity)\s*(?:is\s*)?\d{1,2}\s*(?:out\s+of\s+10|/10)\b"
+        r"\b(?:pain|severity)[:\s]*(?:is\s*)?\d{1,2}\s*(?:out\s+of\s+10|/10)\b"
         r"|\b(mild|moderate|severe)\s+(?:pain|headache|discomfort)\b"
+        r"|\bseverity[:\s]+\d{1,2}/10\b"
     )
-    if not severity_pattern.search(text_norm):
+    severity_unknown_pattern = re.compile(r"\bseverity[:\s]+unknown\b")
+    if not severity_pattern.search(text_norm) and not severity_unknown_pattern.search(text_norm):
         hints.append("Pain severity (0–10) not mentioned.")
 
-    # Onset/duration: look for temporal phrases.
+    # Onset/duration: look for temporal phrases or "Onset: <value>" (from case_to_note).
+    # Also check for "Onset: unknown" which means it was explicitly marked as unknown.
     onset_pattern = re.compile(
         r"\bsince\b|\bfor\s+\d+\s+(?:minutes?|hours?|days?|weeks?)\b|\bstarted\b"
+        r"|\bonset[:\s]+(?!unknown\b)\S+"
     )
-    if not onset_pattern.search(text_norm):
+    onset_unknown_pattern = re.compile(r"\bonset[:\s]+unknown\b")
+    if not onset_pattern.search(text_norm) and not onset_unknown_pattern.search(text_norm):
         hints.append("Onset/duration not mentioned.")
 
     return hints

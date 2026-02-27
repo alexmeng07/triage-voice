@@ -14,15 +14,37 @@ from app.triage_note import missing_info_hints, triage_note
 load_dotenv()
 
 # Test harness: hardcoded transcripts for sanity-checking without audio
+# Format: (transcript, expected_esi, description)
 TEST_TRANSCRIPTS = [
-    "I can't breathe, someone help",
-    "Not breathing",
-    "Chest pain, sweating",
-    "Severe pain, 10 out of 10 in my back",
-    "Moderate headache, feeling dizzy",
-    "Mild stomach ache",
-    "Just a small cut",
-    "Hello, I'm not sure what's wrong",
+    # ESI 1: Life-threatening
+    ("Not breathing", 1, "ESI 1 - not breathing"),
+    ("He is having a seizure right now", 1, "ESI 1 - active seizure"),
+    ("Patient is unresponsive and no pulse", 1, "ESI 1 - cardiac arrest"),
+    ("She is choking and turning blue", 1, "ESI 1 - choking with cyanosis"),
+    # ESI 2: High-risk
+    ("I can't breathe, someone help", 2, "ESI 2 - can't breathe"),
+    ("Chest pain, sweating", 2, "ESI 2 - chest pain"),
+    ("I had a seizure last week", 2, "ESI 2 - seizure history (not active)"),
+    ("My face is drooping and I have slurred speech", 2, "ESI 2 - stroke symptoms"),
+    ("I want to kill myself", 2, "ESI 2 - suicidal ideation"),
+    ("My 2 week old baby has a fever", 2, "ESI 2 - infant <3mo with fever"),
+    ("My newborn has a fever of 101", 2, "ESI 2 - newborn with fever"),
+    ("I feel confused and lethargic", 2, "ESI 2 - altered mental status"),
+    # ESI 3: 2+ resources or severity backstop
+    ("I think I have appendicitis, severe abdominal pain", 3, "ESI 3 - appendicitis (2+ resources)"),
+    ("Pain is 10 out of 10 but otherwise fine", 3, "ESI 3 - severity backstop (10/10 pain)"),
+    ("Moderate headache, feeling dizzy", 3, "ESI 3 - moderate pain backstop"),
+    ("I have abdominal pain since yesterday", 3, "ESI 3 - abdominal pain (2+ resources)"),
+    # ESI 4: 1 resource
+    ("I have a small laceration on my hand", 4, "ESI 4 - laceration (1 resource)"),
+    ("I think I have a UTI", 4, "ESI 4 - UTI (1 resource)"),
+    ("I sprained my ankle", 4, "ESI 4 - sprain (1 resource)"),
+    ("I have an ear infection", 4, "ESI 4 - ear infection (1 resource)"),
+    # ESI 5: 0 resources
+    ("I need a medication refill", 5, "ESI 5 - medication refill (0 resources)"),
+    ("Just a mild cold", 5, "ESI 5 - mild cold (0 resources)"),
+    ("Mild stomach ache", 5, "ESI 5 - mild symptom (0 resources)"),
+    ("Hello, I'm not sure what's wrong", 5, "ESI 5 - unclear symptoms"),
 ]
 
 
@@ -67,12 +89,24 @@ def print_result(result: TriageResult) -> None:
 
 
 def run_test_harness() -> None:
-    for i, transcript in enumerate(TEST_TRANSCRIPTS, 1):
+    passed = 0
+    failed = 0
+    for i, (transcript, expected_esi, description) in enumerate(TEST_TRANSCRIPTS, 1):
         print(f"\n{'='*60}")
-        print(f"TEST {i}/{len(TEST_TRANSCRIPTS)}")
+        print(f"TEST {i}/{len(TEST_TRANSCRIPTS)}: {description}")
         print(f"--- TRANSCRIPT ---\n{transcript}")
         result = triage_from_transcript(transcript)
         print_result(result)
+        
+        status = "PASS" if result.esi_level == expected_esi else "FAIL"
+        if result.esi_level == expected_esi:
+            passed += 1
+        else:
+            failed += 1
+            print(f"\n*** {status}: Expected ESI {expected_esi}, got ESI {result.esi_level} ***")
+    
+    print(f"\n{'='*60}")
+    print(f"TEST SUMMARY: {passed} passed, {failed} failed out of {len(TEST_TRANSCRIPTS)}")
 
 
 def run_full(record_first: bool, wav_path: str) -> None:

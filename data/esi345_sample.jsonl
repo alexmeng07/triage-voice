@@ -1,0 +1,45 @@
+{"id": "esi3_01", "text": "I've had really bad stomach pain since last night, it's getting worse and I feel nauseous", "label": 3}
+{"id": "esi3_02", "text": "I fell and I think my wrist might be fractured, it's swollen and I can't move it", "label": 3}
+{"id": "esi3_03", "text": "I have a kidney stone, the pain is intense and comes in waves", "label": 3}
+{"id": "esi3_04", "text": "My abdominal pain is really bad, 7 out of 10, and I've been vomiting all day", "label": 3}
+{"id": "esi3_05", "text": "I think I might have pneumonia, I've had a bad cough with green mucus and pain when I breathe deeply", "label": 3}
+{"id": "esi3_06", "text": "I fell off a ladder and landed on my back, the pain is severe and I can barely walk", "label": 3}
+{"id": "esi3_07", "text": "I've been severely dehydrated, haven't been able to keep any fluids down for two days", "label": 3}
+{"id": "esi3_08", "text": "I have a high temperature and my lower right abdomen is really tender, could be appendicitis", "label": 3}
+{"id": "esi3_09", "text": "I have a broken bone in my foot, I heard it crack when I twisted my ankle stepping off the curb", "label": 3}
+{"id": "esi3_10", "text": "I bumped my head pretty hard and now I'm dizzy and nauseous, pain is about 8 out of 10", "label": 3}
+{"id": "esi3_11", "text": "I've had constant abdominal pain for three days and it keeps getting worse, can't eat anything", "label": 3}
+{"id": "esi3_12", "text": "My pain is 9 out of 10 in my lower back and going down my leg, I can hardly stand", "label": 3}
+{"id": "esi3_13", "text": "I think I cracked a rib, every time I breathe it hurts and the pain is getting more intense", "label": 3}
+{"id": "esi3_14", "text": "I've been having severe abdominal cramps and bloody stool for two days now", "label": 3}
+{"id": "esi3_15", "text": "I have a bad infection in my leg, it's red and swollen and spreading, and I have a temperature", "label": 3}
+{"id": "esi4_01", "text": "I cut my finger pretty deep while cooking, I think I need stitches", "label": 4}
+{"id": "esi4_02", "text": "I've been having burning when I urinate for a couple of days, probably a UTI", "label": 4}
+{"id": "esi4_03", "text": "I sprained my ankle playing basketball, it's a bit swollen but I can put some weight on it", "label": 4}
+{"id": "esi4_04", "text": "My kid has an ear infection, been pulling at his ear and has a low temperature", "label": 4}
+{"id": "esi4_05", "text": "I have a small laceration on my arm from a piece of metal, it won't stop oozing", "label": 4}
+{"id": "esi4_06", "text": "I twisted my knee hiking and now it's swollen, I might need an x-ray", "label": 4}
+{"id": "esi4_07", "text": "I have a wound on my shin that probably needs stitches, I scraped it on a fence", "label": 4}
+{"id": "esi4_08", "text": "I think I have a urinary tract infection, it burns a lot and I'm going to the bathroom constantly", "label": 4}
+{"id": "esi4_09", "text": "I jammed my finger playing volleyball and it's really swollen, might need an x-ray to check if it's broken", "label": 4}
+{"id": "esi4_10", "text": "I got a cut on my forehead that keeps bleeding, I think it might need a couple of stitches", "label": 4}
+{"id": "esi4_11", "text": "I have a simple wound on my hand from a kitchen knife, it's not too deep but won't close on its own", "label": 4}
+{"id": "esi4_12", "text": "I sprained my wrist catching myself from a fall, it hurts to move but doesn't look deformed", "label": 4}
+{"id": "esi4_13", "text": "I've had painful urination and cloudy urine for about three days now", "label": 4}
+{"id": "esi4_14", "text": "My daughter fell off the monkey bars and her arm is sore, I think we need an x-ray to be safe", "label": 4}
+{"id": "esi4_15", "text": "I got a laceration on my leg while gardening, it's about two inches long and still bleeding a little", "label": 4}
+{"id": "esi5_01", "text": "I just need my blood pressure medication refilled", "label": 5}
+{"id": "esi5_02", "text": "I've had a runny nose and slight cough for a few days, just a mild cold", "label": 5}
+{"id": "esi5_03", "text": "I have a minor rash on my arm that appeared yesterday, it doesn't itch much", "label": 5}
+{"id": "esi5_04", "text": "I need a prescription refill for my thyroid medication", "label": 5}
+{"id": "esi5_05", "text": "I have a simple sore throat, no fever, just a little scratchy for a day or two", "label": 5}
+{"id": "esi5_06", "text": "I'm here for a medication refill, I ran out of my allergy pills", "label": 5}
+{"id": "esi5_07", "text": "I've had a mild cold for about a week, just congestion and sneezing, nothing serious", "label": 5}
+{"id": "esi5_08", "text": "I have a small rash on my hand, it's not spreading and doesn't hurt, just want it looked at", "label": 5}
+{"id": "esi5_09", "text": "I need my diabetes medication refilled, I'm running low", "label": 5}
+{"id": "esi5_10", "text": "I've had a mild headache on and off for a couple days, nothing too bad, probably just stress", "label": 5}
+{"id": "esi5_11", "text": "I just have a slight cough and some sniffles, probably just seasonal allergies", "label": 5}
+{"id": "esi5_12", "text": "I need a prescription refill for my cholesterol medication", "label": 5}
+{"id": "esi5_13", "text": "I have a mild stomach ache, it's not very painful, probably something I ate", "label": 5}
+{"id": "esi5_14", "text": "I want to get a follow-up on some lab results, nothing urgent", "label": 5}
+{"id": "esi5_15", "text": "I've had a tiny bit of a sore throat and a mild cough, just want to make sure it's nothing", "label": 5}

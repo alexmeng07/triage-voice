@@ -82,6 +82,8 @@ def transcribe_wav(wav_path: str) -> str:
 def print_result(result: TriageResult) -> None: 
     print("\n--- CHECKPOINT C: TRIAGE RESULT ---")
     print(f"ESI Level: {result.esi_level}")
+    if result.method != "rule":
+        print(f"Method: {result.method} (confidence: {result.confidence:.0%})")
     print(f"Red flags: {result.red_flags if result.red_flags else '(none)'}")
     print(f"Summary: {result.summary}")
     print(f"Recommended action: {result.recommended_action}")

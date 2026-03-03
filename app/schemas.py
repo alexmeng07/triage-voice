@@ -11,6 +11,8 @@ class TriageResult:
     red_flags: list[str]
     summary: str
     recommended_action: str
+    confidence: float | None = None
+    method: str = "rule"
     disclaimer: str = (
         "This is a simulation and not medical advice. "
         "Always consult a healthcare professional."
@@ -23,5 +25,7 @@ class TriageResult:
             "red_flags": self.red_flags,
             "summary": self.summary,
             "recommended_action": self.recommended_action,
+            "confidence": self.confidence,
+            "method": self.method,
             "disclaimer": self.disclaimer,
         }

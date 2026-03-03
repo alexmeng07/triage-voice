@@ -7,7 +7,7 @@ import re
 from typing import List, Optional
 
 from app.schemas import TriageResult
-from app.triage_rules import triage_from_transcript
+from app.triage_engine import triage
 
 
 @dataclass
@@ -54,8 +54,8 @@ def case_to_note(case: TriageCase) -> str:
 
 
 def triage_note(note: str) -> TriageResult:
-    """Run triage on a standardized triage note."""
-    return triage_from_transcript(note or "")
+    """Run triage on a standardized triage note (routes through hybrid engine)."""
+    return triage(note or "")
 
 
 def missing_info_hints(text: str) -> List[str]:

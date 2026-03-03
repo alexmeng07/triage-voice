@@ -11,3 +11,6 @@ test.wav
 .DS_Store
 Thumbs.db
 .cursor/
+
+artifacts/
+data/generated/

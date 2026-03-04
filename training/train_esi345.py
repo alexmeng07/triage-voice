@@ -10,14 +10,14 @@ import json
 import sys
 from pathlib import Path
 
-import joblib
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split
+import joblib  # type: ignore[import-untyped]
+from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore[import-untyped]
+from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
+from sklearn.metrics import accuracy_score, classification_report  # type: ignore[import-untyped]
+from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
 
 VALID_LABELS = {3, 4, 5}
-DATA_PATH = Path("data/esi345_sample.jsonl")
+DATA_PATH = Path("data/esi345_data.jsonl")
 ARTIFACT_DIR = Path("artifacts")
 
 

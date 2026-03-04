@@ -15,3 +15,6 @@ Thumbs.db
 artifacts/
 data/generated/
 *.jsonl
+*.joblib
+*.vscode
+pyrightconfig.json

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Tuple
 
-import joblib
+import joblib  # type: ignore[import-untyped]
 import numpy as np
 
 _LABEL_CLASSES = [3, 4, 5]
@@ -41,6 +41,8 @@ class ESIClassifier:
     def predict_proba(self, text: str) -> dict[int, float]:
         """Return class probabilities as ``{3: p, 4: p, 5: p}``."""
         self._ensure_loaded()
+        assert self._vectorizer is not None
+        assert self._model is not None
         tfidf = self._vectorizer.transform([text])
         proba = self._model.predict_proba(tfidf)[0]
         classes = list(self._model.classes_)
@@ -49,7 +51,7 @@ class ESIClassifier:
     def predict(self, text: str) -> Tuple[int, float]:
         """Return ``(predicted_label, confidence)`` where confidence is max prob."""
         probas = self.predict_proba(text)
-        label = max(probas, key=probas.get)
+        label = max(probas, key=probas.__getitem__)
         return label, probas[label]
 
 

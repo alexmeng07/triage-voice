@@ -1,11 +1,10 @@
 import argparse
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from elevenlabs.client import ElevenLabs
 
 from app.schemas import TriageResult
+from app.stt import transcribe_wav_file
 from app.triage_rules import triage_from_transcript
 from app.interview import run_interview
 from app.qa_stub import answer_health_question
@@ -63,20 +62,7 @@ def record_audio(path: str = "test.wav", seconds: int = 6) -> None:
 
 
 def transcribe_wav(wav_path: str) -> str:
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing ELEVENLABS_API_KEY. Put it in .env")
-
-    client = ElevenLabs(api_key=api_key)
-    with open(wav_path, "rb") as f:
-        transcription = client.speech_to_text.convert(
-            file=f,
-            model_id="scribe_v2",
-            language_code="eng",
-            diarize=False,
-            tag_audio_events=False,
-        )
-    return getattr(transcription, "text", None) or str(transcription)
+    return transcribe_wav_file(wav_path)
 
 
 def print_result(result: TriageResult) -> None: 

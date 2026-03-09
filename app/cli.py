@@ -10,6 +10,10 @@ from app.interview import run_interview
 from app.qa_stub import answer_health_question
 from app.triage_note import missing_info_hints, triage_note
 
+# Patient registration helpers (new)
+from app.database import init_db
+from app.patient_repository import create_patient, lookup_patients
+
 load_dotenv()
 
 # Test harness: hardcoded transcripts for sanity-checking without audio
@@ -159,6 +163,68 @@ def run_dry_run() -> None:
             print(f"- {h}")
 
 
+def run_register_patient() -> None:
+    """Interactively register a new patient from the command line."""
+    init_db()  # make sure DB exists
+
+    print("\n--- REGISTER NEW PATIENT ---")
+    first_name = input("First name: ").strip()
+    last_name = input("Last name: ").strip()
+    dob = input("Date of birth (YYYY-MM-DD): ").strip()
+    phone = input("Phone (optional, press Enter to skip): ").strip() or None
+    sex = input("Sex (M/F/O, optional): ").strip() or None
+    address = input("Address (optional): ").strip() or None
+
+    if not first_name or not last_name or not dob:
+        print("Error: first_name, last_name, and date_of_birth are required.")
+        return
+
+    patient = create_patient(
+        first_name=first_name,
+        last_name=last_name,
+        date_of_birth=dob,
+        phone=phone,
+        sex=sex,
+        address=address,
+    )
+    print(f"\nPatient created successfully!")
+    print(f"  ID:    {patient['id']}")
+    print(f"  Name:  {patient['first_name']} {patient['last_name']}")
+    print(f"  DOB:   {patient['date_of_birth']}")
+    print(f"  Phone: {patient['phone'] or '(none)'}")
+
+
+def run_lookup_patient() -> None:
+    """Interactively look up patients from the command line."""
+    init_db()  # make sure DB exists
+
+    print("\n--- PATIENT LOOKUP ---")
+    print("(Leave fields blank to skip them)")
+    first_name = input("First name: ").strip() or None
+    last_name = input("Last name: ").strip() or None
+    dob = input("Date of birth (YYYY-MM-DD): ").strip() or None
+    phone = input("Phone: ").strip() or None
+
+    if not any([first_name, last_name, dob, phone]):
+        print("Error: provide at least one search field.")
+        return
+
+    matches = lookup_patients(
+        first_name=first_name,
+        last_name=last_name,
+        date_of_birth=dob,
+        phone=phone,
+    )
+
+    if not matches:
+        print("\nNo patients found.")
+    else:
+        print(f"\nFound {len(matches)} patient(s):")
+        for m in matches:
+            print(f"  ID {m['id']}: {m['first_name']} {m['last_name']} "
+                  f"(DOB: {m['date_of_birth']}, Phone: {m['phone'] or 'N/A'})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Triage-voice Checkpoint C: Record, transcribe, triage (simulation, not medical advice)."
@@ -198,6 +264,17 @@ def main() -> None:
         default="test.wav",
         help="Path to WAV file for record/transcribe mode (default: test.wav)",
     )
+    # --- Patient commands (new) ---
+    parser.add_argument(
+        "--register-patient",
+        action="store_true",
+        help="Interactively register a new patient in the local database.",
+    )
+    parser.add_argument(
+        "--lookup-patient",
+        action="store_true",
+        help="Interactively look up a patient in the local database.",
+    )
     args = parser.parse_args()
 
     # Mode precedence: choose a single clear path.
@@ -230,9 +307,18 @@ def main() -> None:
         run_voicemail(args.voicemail)
         return
 
+    if args.register_patient:
+        run_register_patient()
+        return
+
+    if args.lookup_patient:
+        run_lookup_patient()
+        return
+
     # Default: existing record/wav flow.
     run_full(record_first=args.record, wav_path=args.wav)
 
 
 if __name__ == "__main__":
     main()
+

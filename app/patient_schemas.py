@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from pydantic import BaseModel, Field, field_validator
 
+from app.api_schemas import TriageResponse
+
 
 # ---------------------------------------------------------------------------
 # Patient — Requests
@@ -79,6 +81,7 @@ class RegisterPatientResponse(BaseModel):
     """
     patient: PatientResponse
     duplicate_warning: str | None = None
+    duplicates: list[PatientResponse] = []
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +94,17 @@ class CreateVisitRequest(BaseModel):
         ..., min_length=1, max_length=10000,
         description="The patient transcript or free-text note to triage",
     )
+    pain_score: int | None = Field(None, ge=0, le=10, description="Pain score 0-10")
+    onset: str | None = Field(None, max_length=100, description="Symptom onset timeframe")
+    symptom_location: str | None = Field(None, max_length=200, description="Location of symptoms")
+
+
+class VisitReviewRequest(BaseModel):
+    """Body for PATCH /visits/{visit_id}/review — clinician sign-off fields."""
+    reviewed_by: str | None = Field(None, max_length=100, description="Name of reviewing clinician")
+    reviewed_role: str | None = Field(None, max_length=100, description="Role of reviewing clinician")
+    final_esi_level: int | None = Field(None, ge=1, le=5, description="Clinician-determined ESI level")
+    disposition: str | None = Field(None, max_length=300, description="Patient disposition")
 
 
 class VisitResponse(BaseModel):
@@ -103,6 +117,13 @@ class VisitResponse(BaseModel):
     triage_method: str | None = None
     triage_summary: str | None = None
     recommended_action: str | None = None
+    pain_score: int | None = None
+    onset: str | None = None
+    symptom_location: str | None = None
+    reviewed_by: str | None = None
+    reviewed_role: str | None = None
+    final_esi_level: int | None = None
+    disposition: str | None = None
     created_at: str
 
 
@@ -112,4 +133,4 @@ class TriageVisitResponse(BaseModel):
     Contains the stored visit record AND the full triage result.
     """
     visit: VisitResponse
-    triage: dict  # TriageResult.to_dict() output; kept as dict for flexibility
+    triage: TriageResponse

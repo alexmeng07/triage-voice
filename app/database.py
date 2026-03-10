@@ -66,8 +66,52 @@ CREATE TABLE IF NOT EXISTS visits (
     triage_method       TEXT,
     triage_summary      TEXT,
     recommended_action  TEXT,
+    pain_score          INTEGER,
+    onset               TEXT,
+    symptom_location    TEXT,
+    reviewed_by         TEXT,
+    reviewed_role       TEXT,
+    final_esi_level     INTEGER,
+    disposition         TEXT,
     created_at          TEXT    NOT NULL,
     FOREIGN KEY (patient_id) REFERENCES patients(id)
+);
+"""
+
+_CREATE_AUDIT_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT    NOT NULL,
+    patient_id  INTEGER,
+    visit_id    INTEGER,
+    metadata    TEXT,
+    created_at  TEXT    NOT NULL
+);
+"""
+
+_CREATE_TRAINING_CASES_TABLE = """
+CREATE TABLE IF NOT EXISTS training_cases (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    title           TEXT    NOT NULL,
+    description     TEXT    NOT NULL,
+    transcript      TEXT    NOT NULL,
+    target_esi      INTEGER NOT NULL,
+    rationale       TEXT,
+    category        TEXT,
+    created_at      TEXT    NOT NULL
+);
+"""
+
+_CREATE_TRAINING_ATTEMPTS_TABLE = """
+CREATE TABLE IF NOT EXISTS training_attempts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id         INTEGER NOT NULL,
+    engine_esi      INTEGER NOT NULL,
+    expected_esi    INTEGER NOT NULL,
+    matched         INTEGER NOT NULL,
+    user_identifier TEXT,
+    created_at      TEXT    NOT NULL,
+    FOREIGN KEY (case_id) REFERENCES training_cases(id)
 );
 """
 
@@ -84,21 +128,48 @@ _CREATE_INDEXES = [
 # Initialization
 # ---------------------------------------------------------------------------
 
+def _safe_add_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    """Add a column to a table if it doesn't already exist."""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cursor.fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        logger.info("Added column %s.%s", table, column)
+
+
+_VISITS_MIGRATIONS: list[tuple[str, str]] = [
+    ("pain_score", "INTEGER"),
+    ("onset", "TEXT"),
+    ("symptom_location", "TEXT"),
+    ("reviewed_by", "TEXT"),
+    ("reviewed_role", "TEXT"),
+    ("final_esi_level", "INTEGER"),
+    ("disposition", "TEXT"),
+]
+
+
 def init_db() -> None:
     """Create the database file and tables if they don't already exist.
 
     Safe to call multiple times — every statement uses IF NOT EXISTS.
+    Also runs column-level migrations for existing databases.
     Called automatically when the FastAPI app starts up.
     """
-    # Make sure the parent directory exists (it should, but just in case).
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
     conn = get_connection()
     try:
         conn.execute(_CREATE_PATIENTS_TABLE)
         conn.execute(_CREATE_VISITS_TABLE)
+        conn.execute(_CREATE_AUDIT_LOG_TABLE)
+        conn.execute(_CREATE_TRAINING_CASES_TABLE)
+        conn.execute(_CREATE_TRAINING_ATTEMPTS_TABLE)
         for idx_sql in _CREATE_INDEXES:
             conn.execute(idx_sql)
+
+        for col_name, col_type in _VISITS_MIGRATIONS:
+            _safe_add_column(conn, "visits", col_name, col_type)
+
         conn.commit()
         logger.info("Database initialized at %s", DB_PATH)
     finally:

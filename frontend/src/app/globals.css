@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-cream: #FFFDF5;
+  --color-sky: #95B1EE;
+  --color-sky-light: #B8CCFF;
+  --color-navy: #364C84;
+  --color-navy-light: #4A6AAF;
+  --color-navy-dark: #2A3D6A;
+  --color-sage: #E7F1A8;
+  --color-sage-dark: #C4D66E;
+
+  --font-serif: var(--font-lora), "Georgia", "Times New Roman", serif;
+}
+
+body {
+  background: var(--color-cream);
+  color: #1a1a2e;
+}

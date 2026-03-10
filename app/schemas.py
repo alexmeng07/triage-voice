@@ -14,8 +14,9 @@ class TriageResult:
     confidence: float | None = None
     method: str = "rule"
     disclaimer: str = (
-        "This is a simulation and not medical advice. "
-        "Always consult a healthcare professional."
+        "This is a training and documentation aid, not medical advice or a "
+        "clinical decision support tool. All triage suggestions must be "
+        "reviewed by a qualified clinician before any clinical action is taken."
     )
 
     def to_dict(self) -> dict:

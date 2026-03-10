@@ -218,6 +218,9 @@ def create_visit(
     triage_method: str | None = None,
     triage_summary: str | None = None,
     recommended_action: str | None = None,
+    pain_score: int | None = None,
+    onset: str | None = None,
+    symptom_location: str | None = None,
 ) -> dict[str, Any]:
     """Insert a new visit row and return it as a dict."""
     now = _now_iso()
@@ -228,18 +231,56 @@ def create_visit(
             """
             INSERT INTO visits (patient_id, chief_complaint, triage_note,
                                 esi_level, triage_method, triage_summary,
-                                recommended_action, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                recommended_action, pain_score, onset,
+                                symptom_location, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (patient_id, chief_complaint, triage_note,
              esi_level, triage_method, triage_summary,
-             recommended_action, now),
+             recommended_action, pain_score, onset,
+             symptom_location, now),
         )
         conn.commit()
         visit_id = cursor.lastrowid
 
         row = conn.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
         return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def get_visit_by_id(visit_id: int) -> dict[str, Any] | None:
+    """Fetch a single visit by primary key, or None if not found."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_visit_review(
+    visit_id: int,
+    reviewed_by: str | None = None,
+    reviewed_role: str | None = None,
+    final_esi_level: int | None = None,
+    disposition: str | None = None,
+) -> dict[str, Any] | None:
+    """Update review fields on a visit. Returns the updated row or None."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE visits
+            SET reviewed_by = ?, reviewed_role = ?,
+                final_esi_level = ?, disposition = ?
+            WHERE id = ?
+            """,
+            (reviewed_by, reviewed_role, final_esi_level, disposition, visit_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
+        return _row_to_dict(row) if row else None
     finally:
         conn.close()
 
@@ -251,6 +292,212 @@ def list_visits_for_patient(patient_id: int) -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT * FROM visits WHERE patient_id = ? ORDER BY created_at DESC",
             (patient_id,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_todays_patients_with_visits() -> list[dict[str, Any]]:
+    """Return patients who have visits created today, with their latest visit info."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT p.*,
+                   v.id AS latest_visit_id,
+                   v.esi_level AS latest_esi_level,
+                   v.triage_method AS latest_triage_method,
+                   v.chief_complaint AS latest_chief_complaint,
+                   v.created_at AS latest_visit_at,
+                   v.final_esi_level AS latest_final_esi,
+                   v.disposition AS latest_disposition
+            FROM patients p
+            LEFT JOIN (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY patient_id ORDER BY created_at DESC) AS rn
+                FROM visits
+                WHERE created_at LIKE ? || '%'
+            ) v ON p.id = v.patient_id AND v.rn = 1
+            WHERE p.id IN (
+                SELECT DISTINCT patient_id FROM visits WHERE created_at LIKE ? || '%'
+            )
+            ORDER BY v.created_at DESC
+            """,
+            (today, today),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Audit Log
+# ---------------------------------------------------------------------------
+
+def create_audit_entry(
+    action_type: str,
+    patient_id: int | None = None,
+    visit_id: int | None = None,
+    metadata: str | None = None,
+) -> None:
+    """Insert an audit log entry."""
+    now = _now_iso()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO audit_log (action_type, patient_id, visit_id, metadata, created_at) VALUES (?, ?, ?, ?, ?)",
+            (action_type, patient_id, visit_id, metadata, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_audit_entries(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    """Return audit log entries, newest first."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Analytics helpers
+# ---------------------------------------------------------------------------
+
+def get_esi_distribution(since: str | None = None) -> list[dict[str, Any]]:
+    """Return count of visits per ESI level, optionally filtered by date."""
+    conn = get_connection()
+    try:
+        if since:
+            rows = conn.execute(
+                "SELECT esi_level, COUNT(*) as count FROM visits WHERE created_at >= ? GROUP BY esi_level ORDER BY esi_level",
+                (since,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT esi_level, COUNT(*) as count FROM visits GROUP BY esi_level ORDER BY esi_level",
+            ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_common_complaints(limit: int = 10) -> list[dict[str, Any]]:
+    """Return top chief complaints by frequency."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT chief_complaint, COUNT(*) as count
+            FROM visits
+            WHERE chief_complaint IS NOT NULL AND chief_complaint != ''
+            GROUP BY chief_complaint
+            ORDER BY count DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Training Cases CRUD
+# ---------------------------------------------------------------------------
+
+def create_training_case(
+    title: str,
+    description: str,
+    transcript: str,
+    target_esi: int,
+    rationale: str | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Insert a training case and return it."""
+    now = _now_iso()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO training_cases (title, description, transcript, target_esi, rationale, category, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (title, description, transcript, target_esi, rationale, category, now),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM training_cases WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def list_training_cases() -> list[dict[str, Any]]:
+    """Return all training cases."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM training_cases ORDER BY id").fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_training_case_by_id(case_id: int) -> dict[str, Any] | None:
+    """Fetch a single training case."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM training_cases WHERE id = ?", (case_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_training_attempt(
+    case_id: int,
+    engine_esi: int,
+    expected_esi: int,
+    user_identifier: str | None = None,
+) -> dict[str, Any]:
+    """Record a training attempt."""
+    now = _now_iso()
+    matched = 1 if engine_esi == expected_esi else 0
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO training_attempts (case_id, engine_esi, expected_esi, matched, user_identifier, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (case_id, engine_esi, expected_esi, matched, user_identifier, now),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM training_attempts WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def get_training_stats() -> list[dict[str, Any]]:
+    """Return aggregate training statistics per case."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT tc.id as case_id, tc.title, tc.target_esi,
+                   COUNT(ta.id) as attempts,
+                   SUM(ta.matched) as matches
+            FROM training_cases tc
+            LEFT JOIN training_attempts ta ON tc.id = ta.case_id
+            GROUP BY tc.id
+            ORDER BY tc.id
+            """,
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
     finally:

@@ -1,0 +1,166 @@
+/* TypeScript interfaces mirroring backend Pydantic models. */
+
+// ── Response types ──────────────────────────────────────────────────────
+
+export interface PatientResponse {
+  id: number;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  phone: string | null;
+  sex: string | null;
+  address: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientLookupResponse {
+  matches: PatientResponse[];
+  count: number;
+}
+
+export interface RegisterPatientResponse {
+  patient: PatientResponse;
+  duplicate_warning: string | null;
+  duplicates: PatientResponse[];
+}
+
+export interface VisitResponse {
+  id: number;
+  patient_id: number;
+  chief_complaint: string | null;
+  triage_note: string | null;
+  esi_level: number | null;
+  triage_method: string | null;
+  triage_summary: string | null;
+  recommended_action: string | null;
+  pain_score: number | null;
+  onset: string | null;
+  symptom_location: string | null;
+  reviewed_by: string | null;
+  reviewed_role: string | null;
+  final_esi_level: number | null;
+  disposition: string | null;
+  created_at: string;
+}
+
+export interface TriageResponse {
+  esi_level: number;
+  red_flags: string[];
+  summary: string;
+  recommended_action: string;
+  confidence: number | null;
+  method: string;
+  disclaimer: string;
+}
+
+export interface TriageVisitResponse {
+  visit: VisitResponse;
+  triage: TriageResponse;
+}
+
+// ── Request types ───────────────────────────────────────────────────────
+
+export interface CreatePatientRequest {
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  phone?: string;
+  sex?: string;
+  address?: string;
+}
+
+export interface PatientLookupRequest {
+  first_name?: string;
+  last_name?: string;
+  date_of_birth?: string;
+  phone?: string;
+}
+
+export interface CreateVisitRequest {
+  transcript_or_note: string;
+  pain_score?: number | null;
+  onset?: string | null;
+  symptom_location?: string | null;
+}
+
+export interface VisitReviewRequest {
+  reviewed_by?: string | null;
+  reviewed_role?: string | null;
+  final_esi_level?: number | null;
+  disposition?: string | null;
+}
+
+// ── Training types ──────────────────────────────────────────────────────
+
+export interface TrainingCase {
+  id: number;
+  title: string;
+  description: string;
+  transcript: string;
+  target_esi: number;
+  rationale: string | null;
+  category: string | null;
+  created_at: string;
+}
+
+export interface TrainingAttemptResult {
+  attempt: {
+    id: number;
+    case_id: number;
+    engine_esi: number;
+    expected_esi: number;
+    matched: number;
+    created_at: string;
+  };
+  triage: TriageResponse;
+  expected_esi: number;
+  matched: number;
+}
+
+export interface TrainingStats {
+  case_id: number;
+  title: string;
+  target_esi: number;
+  attempts: number;
+  matches: number;
+}
+
+// ── Queue types ─────────────────────────────────────────────────────────
+
+export interface QueueEntry {
+  id: number;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  phone: string | null;
+  sex: string | null;
+  latest_visit_id: number | null;
+  latest_esi_level: number | null;
+  latest_triage_method: string | null;
+  latest_chief_complaint: string | null;
+  latest_visit_at: string | null;
+  latest_final_esi: number | null;
+  latest_disposition: string | null;
+}
+
+// ── Admin types ─────────────────────────────────────────────────────────
+
+export interface EsiDistribution {
+  esi_level: number | null;
+  count: number;
+}
+
+export interface ComplaintCount {
+  chief_complaint: string;
+  count: number;
+}
+
+export interface AuditEntry {
+  id: number;
+  action_type: string;
+  patient_id: number | null;
+  visit_id: number | null;
+  metadata: string | null;
+  created_at: string;
+}

@@ -33,12 +33,23 @@ from app.triage_engine import triage
 from app.database import init_db
 from app.patient_repository import (
     check_duplicate_patient,
+    create_audit_entry,
     create_patient,
+    create_training_attempt,
     create_visit,
+    get_common_complaints,
+    get_esi_distribution,
     get_patient_by_id,
+    get_training_case_by_id,
+    get_training_stats,
+    get_visit_by_id,
+    list_audit_entries,
+    list_todays_patients_with_visits,
+    list_training_cases,
     list_visits_for_patient,
     lookup_patients,
     search_patients,
+    update_visit_review,
 )
 from app.patient_schemas import (
     CreatePatientRequest,
@@ -48,6 +59,7 @@ from app.patient_schemas import (
     PatientResponse,
     RegisterPatientResponse,
     TriageVisitResponse,
+    VisitReviewRequest,
     VisitResponse,
 )
 
@@ -210,15 +222,16 @@ async def register_patient(req: CreatePatientRequest) -> RegisterPatientResponse
     already exists, a duplicate_warning is included (but the patient is
     still created — this is just an informational heads-up).
     """
-    # Check for possible duplicates before inserting.
     dupes = check_duplicate_patient(req.first_name, req.last_name, req.date_of_birth)
     warning: str | None = None
+    dupe_records: list[PatientResponse] = []
     if dupes:
         ids = ", ".join(str(d["id"]) for d in dupes)
         warning = (
             f"Possible duplicate(s) found with same name and DOB "
             f"(existing patient IDs: {ids}). Patient was still created."
         )
+        dupe_records = [PatientResponse(**d) for d in dupes]
 
     patient = create_patient(
         first_name=req.first_name,
@@ -229,9 +242,12 @@ async def register_patient(req: CreatePatientRequest) -> RegisterPatientResponse
         address=req.address,
     )
 
+    create_audit_entry("patient_registered", patient_id=patient["id"])
+
     return RegisterPatientResponse(
         patient=PatientResponse(**patient),
         duplicate_warning=warning,
+        duplicates=dupe_records,
     )
 
 
@@ -261,6 +277,12 @@ async def patient_lookup(req: PatientLookupRequest) -> PatientLookupResponse:
         matches=[PatientResponse(**m) for m in matches],
         count=len(matches),
     )
+
+
+@app.get("/patients/queue")
+async def patient_queue():
+    """Return today's patients with their latest visit info for the arrival board."""
+    return list_todays_patients_with_visits()
 
 
 @app.get("/patients/{patient_id}", response_model=PatientResponse)
@@ -302,22 +324,130 @@ async def create_triage_visit(patient_id: int, req: CreateVisitRequest) -> Triag
     if patient is None:
         raise HTTPException(status_code=404, detail=f"Patient {patient_id} not found")
 
-    # Step 2: run triage (reuses existing engine — no duplication!)
     triage_result = triage(req.transcript_or_note)
 
-    # Step 3: store visit
     visit = create_visit(
         patient_id=patient_id,
-        chief_complaint=req.transcript_or_note,  # store the raw input as chief complaint
+        chief_complaint=req.transcript_or_note,
         triage_note=req.transcript_or_note,
         esi_level=triage_result.esi_level,
         triage_method=triage_result.method,
         triage_summary=triage_result.summary,
         recommended_action=triage_result.recommended_action,
+        pain_score=req.pain_score,
+        onset=req.onset,
+        symptom_location=req.symptom_location,
     )
 
-    # Step 4: return combined response
+    create_audit_entry("triage_visit_created", patient_id=patient_id, visit_id=visit["id"])
+
     return TriageVisitResponse(
         visit=VisitResponse(**visit),
-        triage=triage_result.to_dict(),
+        triage=TriageResponse(**triage_result.to_dict()),
     )
+
+
+# ===========================================================================
+#  VISIT REVIEW — clinician sign-off
+# ===========================================================================
+
+
+@app.patch("/visits/{visit_id}/review", response_model=VisitResponse)
+async def review_visit(visit_id: int, req: VisitReviewRequest) -> VisitResponse:
+    """Update clinician review fields on a visit."""
+    existing = get_visit_by_id(visit_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Visit {visit_id} not found")
+
+    updated = update_visit_review(
+        visit_id=visit_id,
+        reviewed_by=req.reviewed_by,
+        reviewed_role=req.reviewed_role,
+        final_esi_level=req.final_esi_level,
+        disposition=req.disposition,
+    )
+    if updated is None:
+        raise HTTPException(status_code=500, detail="Failed to update visit")
+
+    create_audit_entry(
+        "visit_reviewed",
+        patient_id=existing["patient_id"],
+        visit_id=visit_id,
+    )
+
+    return VisitResponse(**updated)
+
+
+# ===========================================================================
+#  TRAINING CASES
+# ===========================================================================
+
+
+@app.get("/training/cases")
+async def list_cases():
+    """List all training case metadata."""
+    return list_training_cases()
+
+
+@app.get("/training/cases/{case_id}")
+async def get_case(case_id: int):
+    """Get a single training case with full transcript."""
+    case = get_training_case_by_id(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"Training case {case_id} not found")
+    return case
+
+
+@app.post("/training/cases/{case_id}/attempt")
+async def attempt_case(case_id: int):
+    """Run the triage engine on a training case and record the attempt."""
+    case = get_training_case_by_id(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"Training case {case_id} not found")
+
+    triage_result = triage(case["transcript"])
+
+    attempt = create_training_attempt(
+        case_id=case_id,
+        engine_esi=triage_result.esi_level,
+        expected_esi=case["target_esi"],
+    )
+
+    return {
+        "attempt": attempt,
+        "triage": triage_result.to_dict(),
+        "expected_esi": case["target_esi"],
+        "matched": attempt["matched"],
+    }
+
+
+@app.get("/training/stats")
+async def training_statistics():
+    """Return aggregate training case statistics."""
+    return get_training_stats()
+
+
+# ===========================================================================
+#  ADMIN / ANALYTICS
+# ===========================================================================
+
+
+@app.get("/admin/audit")
+async def audit_log(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Return audit log entries, newest first."""
+    return list_audit_entries(limit=limit, offset=offset)
+
+
+@app.get("/admin/stats/esi-distribution")
+async def esi_distribution(since: str | None = Query(None)):
+    """Return count of visits grouped by ESI level."""
+    return get_esi_distribution(since=since)
+
+
+@app.get("/admin/stats/common-complaints")
+async def common_complaints(limit: int = Query(10, ge=1, le=50)):
+    """Return top chief complaints by frequency."""
+    return get_common_complaints(limit=limit)

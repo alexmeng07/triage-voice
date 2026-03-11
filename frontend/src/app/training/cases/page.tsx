@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getTrainingCases, attemptTrainingCase, ApiError } from "@/lib/api";
+import { getTrainingCases, attemptTrainingCase, triageAllCases, ApiError } from "@/lib/api";
 import type { TrainingCase, TrainingAttemptResult } from "@/lib/types";
 import {
   BookOpen,
@@ -13,6 +13,7 @@ import {
   BarChart3,
   AlertTriangle,
   ShieldAlert,
+  Zap,
 } from "lucide-react";
 
 function esiColor(level: number): string {
@@ -39,19 +40,21 @@ export default function TrainingCasesPage() {
   const [selectedCase, setSelectedCase] = useState<TrainingCase | null>(null);
   const [attemptResult, setAttemptResult] = useState<TrainingAttemptResult | null>(null);
   const [attempting, setAttempting] = useState(false);
+  const [triageAllInProgress, setTriageAllInProgress] = useState(false);
+
+  async function loadCases() {
+    try {
+      const data = await getTrainingCases();
+      setCases(data);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Failed to load training cases");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      try {
-        const data = await getTrainingCases();
-        setCases(data);
-      } catch (err) {
-        setError(err instanceof ApiError ? err.detail : "Failed to load training cases");
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+    loadCases();
   }, []);
 
   async function handleAttempt(c: TrainingCase) {
@@ -61,10 +64,24 @@ export default function TrainingCasesPage() {
     try {
       const result = await attemptTrainingCase(c.id);
       setAttemptResult(result);
+      await loadCases();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Attempt failed");
     } finally {
       setAttempting(false);
+    }
+  }
+
+  async function handleTriageAll() {
+    setTriageAllInProgress(true);
+    setError(null);
+    try {
+      await triageAllCases();
+      await loadCases();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Triage all failed");
+    } finally {
+      setTriageAllInProgress(false);
     }
   }
 
@@ -215,7 +232,7 @@ export default function TrainingCasesPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-navy">Training Cases</h1>
           <p className="mt-1 text-navy/60">
@@ -224,13 +241,32 @@ export default function TrainingCasesPage() {
             expected ESI level.
           </p>
         </div>
-        <Link
-          href="/training/stats"
-          className="inline-flex items-center gap-2 rounded-xl border border-navy/15 px-4 py-2 text-sm text-navy transition-colors hover:bg-navy/5 shrink-0 cursor-pointer"
-        >
-          <BarChart3 size={16} />
-          View Stats
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleTriageAll}
+            disabled={triageAllInProgress || cases.length === 0}
+            className="inline-flex items-center gap-2 rounded-xl bg-navy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-navy-dark disabled:opacity-40 cursor-pointer"
+          >
+            {triageAllInProgress ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                Triage all...
+              </>
+            ) : (
+              <>
+                <Zap size={16} />
+                Triage All
+              </>
+            )}
+          </button>
+          <Link
+            href="/training/stats"
+            className="inline-flex items-center gap-2 rounded-xl border border-navy/15 px-4 py-2 text-sm text-navy transition-colors hover:bg-navy/5 cursor-pointer"
+          >
+            <BarChart3 size={16} />
+            View Stats
+          </Link>
+        </div>
       </div>
 
       {error && (
@@ -264,17 +300,40 @@ export default function TrainingCasesPage() {
                   {c.description}
                 </p>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3 flex-wrap justify-end min-w-0">
                 {c.category && (
                   <span className="text-xs bg-navy/5 text-navy/50 px-2 py-0.5 rounded-md">
                     {c.category}
                   </span>
                 )}
-                <span
-                  className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${esiColor(c.target_esi)}`}
-                >
-                  Target ESI {c.target_esi}
-                </span>
+                {c.last_engine_esi != null ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-navy/50">
+                      Engine:{" "}
+                      <span
+                        className={`inline-block rounded-md border px-2 py-0.5 font-medium ${esiColor(c.last_engine_esi)}`}
+                      >
+                        ESI {c.last_engine_esi}
+                      </span>
+                    </span>
+                    <span className="text-navy/30">|</span>
+                    <span className="text-xs text-navy/50">
+                      Target:{" "}
+                      <span
+                        className={`inline-block rounded-md border px-2 py-0.5 font-medium ${esiColor(c.target_esi)}`}
+                      >
+                        ESI {c.target_esi}
+                      </span>
+                    </span>
+                    {c.last_matched ? (
+                      <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <XCircle size={14} className="text-red-500 shrink-0" />
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-xs text-navy/40 italic">Not yet triaged</span>
+                )}
               </div>
             </button>
           ))}

@@ -11,7 +11,10 @@ import type {
   TrainingCase,
   TrainingAttemptResult,
   TrainingStats,
+  TriageAllResponse,
   QueueEntry,
+  QueueVisitEntry,
+  QueueSummary,
   EsiDistribution,
   ComplaintCount,
 } from "./types";
@@ -96,8 +99,27 @@ export async function reviewVisit(
   });
 }
 
-// ── Queue ───────────────────────────────────────────────────────────────
+// ── Queue (visit-centric) ────────────────────────────────────────────────
 
+export async function getQueue(): Promise<QueueVisitEntry[]> {
+  return request("/queue");
+}
+
+export async function getQueueSummary(): Promise<QueueSummary> {
+  return request("/queue/summary");
+}
+
+export async function updateVisitStatus(
+  visitId: number,
+  status: string,
+): Promise<VisitResponse> {
+  return request(`/visits/${visitId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** @deprecated Use getQueue() for visit-centric queue. */
 export async function getPatientQueue(): Promise<QueueEntry[]> {
   return request("/patients/queue");
 }
@@ -114,6 +136,10 @@ export async function getTrainingCase(id: number): Promise<TrainingCase> {
 
 export async function attemptTrainingCase(caseId: number): Promise<TrainingAttemptResult> {
   return request(`/training/cases/${caseId}/attempt`, { method: "POST" });
+}
+
+export async function triageAllCases(): Promise<TriageAllResponse> {
+  return request("/training/cases/triage-all", { method: "POST" });
 }
 
 export async function getTrainingStats(): Promise<TrainingStats[]> {

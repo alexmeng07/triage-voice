@@ -19,3 +19,4 @@ data/*.db
 *.joblib
 *.vscode
 pyrightconfig.json
+node_modules

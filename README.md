@@ -32,6 +32,8 @@ npm run dev          # → http://localhost:3000
 The frontend calls the FastAPI backend at `http://localhost:8000` by default.
 Override with the `NEXT_PUBLIC_API_URL` environment variable (see `frontend/.env.example`).
 
+**Queue page:** `/queue` — View active visits by acuity, update status (waiting → in_triage → triaged → with_doctor → complete).
+
 ---
 
 ## API Reference
@@ -51,6 +53,14 @@ Override with the `NEXT_PUBLIC_API_URL` environment variable (see `frontend/.env
 | POST | `/triage` | Triage from text input |
 | POST | `/triage/audio` | Triage from audio file upload |
 
+### Queue (visit-centric)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/queue` | List active visits (status ≠ complete), sorted by acuity then arrival |
+| GET | `/queue/summary` | Aggregate counts: waiting, in_triage, triaged, with_doctor |
+| PATCH | `/visits/{visit_id}/status` | Update a visit's queue status |
+
 ### Patients
 
 | Method | Path | Description |
@@ -61,6 +71,7 @@ Override with the `NEXT_PUBLIC_API_URL` environment variable (see `frontend/.env
 | GET | `/patients/{patient_id}` | Get patient by ID |
 | GET | `/patients/{patient_id}/visits` | List visits for a patient |
 | POST | `/patients/{patient_id}/triage-visit` | Run triage and create a visit |
+| GET | `/patients/queue` | *(Legacy)* Today's patients with latest visit (use `/queue` for visit-centric) |
 
 ---
 
@@ -218,6 +229,8 @@ python -m scripts.seed_patients
 ```
 
 Inserts 4 patients (Jane Doe, John Smith, Maria Garcia, Robert Chen) and 2 sample visits. Safe to run multiple times.
+
+Seeded visits are created with `status=triaged` and will appear in the queue at `/queue` until moved to `complete`.
 
 ---
 

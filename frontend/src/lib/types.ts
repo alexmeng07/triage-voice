@@ -41,6 +41,9 @@ export interface VisitResponse {
   reviewed_role: string | null;
   final_esi_level: number | null;
   disposition: string | null;
+  status: string | null;
+  arrival_time: string | null;
+  triage_time: string | null;
   created_at: string;
 }
 
@@ -102,6 +105,24 @@ export interface TrainingCase {
   rationale: string | null;
   category: string | null;
   created_at: string;
+  /** Engine ESI from the most recent attempt; null if never triaged */
+  last_engine_esi?: number | null;
+  /** 1 if last attempt matched, 0 if not; null if never triaged */
+  last_matched?: number | null;
+}
+
+export interface TriageAllResult {
+  case_id: number;
+  title: string;
+  target_esi: number;
+  engine_esi: number;
+  matched: number;
+}
+
+export interface TriageAllResponse {
+  results: TriageAllResult[];
+  total: number;
+  matched: number;
 }
 
 export interface TrainingAttemptResult {
@@ -126,8 +147,29 @@ export interface TrainingStats {
   matches: number;
 }
 
-// ── Queue types ─────────────────────────────────────────────────────────
+// ── Queue types (visit-centric) ──────────────────────────────────────────
 
+export interface QueueVisitEntry {
+  visit_id: number;
+  patient_id: number;
+  patient_name: string;
+  date_of_birth: string;
+  chief_complaint: string | null;
+  esi_level: number | null;
+  status: string;
+  arrival_time: string | null;
+  triage_time: string | null;
+  wait_minutes: number | null;
+}
+
+export interface QueueSummary {
+  waiting: number;
+  in_triage: number;
+  triaged: number;
+  with_doctor: number;
+}
+
+/** @deprecated Use QueueVisitEntry and getQueue() for visit-centric queue. */
 export interface QueueEntry {
   id: number;
   first_name: string;

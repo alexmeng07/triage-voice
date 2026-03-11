@@ -2,15 +2,30 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getPatientQueue, ApiError } from "@/lib/api";
-import type { QueueEntry } from "@/lib/types";
 import {
-  Users,
-  Activity,
-  Clock,
-  AlertTriangle,
-  RefreshCw,
-} from "lucide-react";
+  getQueue,
+  getQueueSummary,
+  updateVisitStatus,
+  ApiError,
+} from "@/lib/api";
+import type { QueueVisitEntry, QueueSummary } from "@/lib/types";
+import { RefreshCw, Users } from "lucide-react";
+
+const STATUS_LABELS: Record<string, string> = {
+  waiting: "Waiting",
+  in_triage: "In Triage",
+  triaged: "Triaged",
+  with_doctor: "With Doctor",
+  complete: "Complete",
+};
+
+const STATUS_FLOW: Record<string, string | null> = {
+  waiting: "in_triage",
+  in_triage: "triaged",
+  triaged: "with_doctor",
+  with_doctor: "complete",
+  complete: null,
+};
 
 function esiColor(level: number | null): string {
   switch (level) {
@@ -37,32 +52,35 @@ function formatTime(iso: string | null): string {
       minute: "2-digit",
     });
   } catch {
-    return iso;
+    return String(iso).slice(0, 5);
   }
 }
 
-const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
-
-function isStale(visitAt: string | null): boolean {
-  if (!visitAt) return false;
-  try {
-    return Date.now() - new Date(visitAt).getTime() > STALE_THRESHOLD_MS;
-  } catch {
-    return false;
-  }
+function formatWait(min: number | null): string {
+  if (min === null || min === undefined) return "—";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
 export default function QueuePage() {
-  const [entries, setEntries] = useState<QueueEntry[]>([]);
+  const [entries, setEntries] = useState<QueueVisitEntry[]>([]);
+  const [summary, setSummary] = useState<QueueSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getPatientQueue();
-      setEntries(data);
+      const [queueData, summaryData] = await Promise.all([
+        getQueue(),
+        getQueueSummary(),
+      ]);
+      setEntries(queueData);
+      setSummary(summaryData);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Failed to load queue");
     } finally {
@@ -74,15 +92,34 @@ export default function QueuePage() {
     load();
   }, []);
 
-  const noTriageCount = entries.filter((e) => e.latest_visit_id === null).length;
+  async function handleAdvance(e: QueueVisitEntry) {
+    const next = STATUS_FLOW[e.status];
+    if (!next) return;
+    setUpdatingId(e.visit_id);
+    try {
+      await updateVisitStatus(e.visit_id, next);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Failed to update status");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  const totalActive =
+    summary &&
+    summary.waiting +
+      summary.in_triage +
+      summary.triaged +
+      summary.with_doctor;
 
   return (
     <div className="space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-navy">Patient Queue</h1>
+          <h1 className="text-2xl font-semibold text-navy">Visit Queue</h1>
           <p className="mt-1 text-navy/60">
-            Today&apos;s patients with their latest triage status.
+            Active visits by acuity. Update status as patients move through triage.
           </p>
         </div>
         <button
@@ -95,17 +132,26 @@ export default function QueuePage() {
         </button>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+      {summary && totalActive !== undefined && totalActive > 0 && (
+        <div className="flex flex-wrap gap-4 text-sm">
+          <span className="text-navy/60">
+            Waiting: <strong className="text-navy">{summary.waiting}</strong>
+          </span>
+          <span className="text-navy/60">
+            In triage: <strong className="text-navy">{summary.in_triage}</strong>
+          </span>
+          <span className="text-navy/60">
+            Triaged: <strong className="text-navy">{summary.triaged}</strong>
+          </span>
+          <span className="text-navy/60">
+            With doctor: <strong className="text-navy">{summary.with_doctor}</strong>
+          </span>
         </div>
       )}
 
-      {noTriageCount > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
-          <AlertTriangle size={16} className="shrink-0" />
-          {noTriageCount} patient{noTriageCount > 1 ? "s" : ""} today with no
-          triage visit recorded.
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
         </div>
       )}
 
@@ -116,8 +162,9 @@ export default function QueuePage() {
       ) : entries.length === 0 ? (
         <div className="rounded-xl border border-navy/10 bg-white px-6 py-12 text-center">
           <Users size={32} className="mx-auto text-navy/20 mb-3" />
-          <p className="text-navy/40 text-sm">
-            No patients with visits today.
+          <p className="text-navy/40 text-sm">No active visits in queue.</p>
+          <p className="mt-1 text-navy/30 text-xs">
+            Create a triage visit from a patient record to add visits here.
           </p>
         </div>
       ) : (
@@ -129,92 +176,84 @@ export default function QueuePage() {
                   Patient
                 </th>
                 <th className="px-5 py-3 text-xs font-medium text-navy/50">
-                  DOB
+                  Complaint
                 </th>
                 <th className="px-5 py-3 text-xs font-medium text-navy/50 text-center">
                   ESI
                 </th>
-                <th className="px-5 py-3 text-xs font-medium text-navy/50 text-center">
-                  Final ESI
-                </th>
-                <th className="px-5 py-3 text-xs font-medium text-navy/50">
-                  Last Visit
-                </th>
                 <th className="px-5 py-3 text-xs font-medium text-navy/50">
                   Status
                 </th>
-                <th className="px-5 py-3 text-xs font-medium text-navy/50" />
+                <th className="px-5 py-3 text-xs font-medium text-navy/50">
+                  Arrival
+                </th>
+                <th className="px-5 py-3 text-xs font-medium text-navy/50">
+                  Wait
+                </th>
+                <th className="px-5 py-3 text-xs font-medium text-navy/50 w-32">
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody>
               {entries.map((e) => {
-                const stale = isStale(e.latest_visit_at);
+                const nextStatus = STATUS_FLOW[e.status];
+                const isUpdating = updatingId === e.visit_id;
                 return (
                   <tr
-                    key={e.id}
+                    key={e.visit_id}
                     className="border-b border-navy/5 last:border-0 hover:bg-navy/[0.02]"
                   >
                     <td className="px-5 py-3">
                       <Link
-                        href={`/patients/${e.id}`}
+                        href={`/patients/${e.patient_id}`}
                         className="font-medium text-navy hover:text-sky transition-colors"
                       >
-                        {e.last_name}, {e.first_name}
+                        {e.patient_name}
                       </Link>
-                    </td>
-                    <td className="px-5 py-3 text-navy/60">{e.date_of_birth}</td>
-                    <td className="px-5 py-3 text-center">
-                      {e.latest_esi_level !== null ? (
-                        <span
-                          className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${esiColor(e.latest_esi_level)}`}
-                        >
-                          {e.latest_esi_level}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-navy/30">—</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-center">
-                      {e.latest_final_esi !== null ? (
-                        <span className="inline-block rounded-md border border-navy/20 bg-navy/5 px-2 py-0.5 text-xs font-medium text-navy">
-                          {e.latest_final_esi}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-navy/30">—</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3">
-                      <span className="inline-flex items-center gap-1 text-xs text-navy/50">
-                        <Clock size={12} />
-                        {formatTime(e.latest_visit_at)}
+                      <span className="ml-1.5 text-xs text-navy/40">
+                        {e.date_of_birth}
                       </span>
                     </td>
-                    <td className="px-5 py-3">
-                      {e.latest_disposition ? (
-                        <span className="text-xs text-navy/60">
-                          {e.latest_disposition}
-                        </span>
-                      ) : stale ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-amber-600">
-                          <AlertTriangle size={12} />
-                          May need re-triage
-                        </span>
-                      ) : e.latest_visit_id === null ? (
-                        <span className="text-xs text-red-500">
-                          No triage yet
+                    <td className="px-5 py-3 text-navy/70 max-w-[200px] truncate">
+                      {e.chief_complaint || "—"}
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      {e.esi_level !== null ? (
+                        <span
+                          className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${esiColor(e.esi_level)}`}
+                        >
+                          {e.esi_level}
                         </span>
                       ) : (
-                        <span className="text-xs text-navy/30">Waiting</span>
+                        <span className="text-xs text-navy/30">—</span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-right">
-                      <Link
-                        href={`/patients/${e.id}/triage`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-navy/15 px-3 py-1.5 text-xs text-navy transition-colors hover:bg-navy/5 cursor-pointer"
-                      >
-                        <Activity size={12} />
-                        Triage
-                      </Link>
+                    <td className="px-5 py-3">
+                      <span className="text-xs text-navy/70">
+                        {STATUS_LABELS[e.status] ?? e.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-xs text-navy/50">
+                      {formatTime(e.arrival_time)}
+                    </td>
+                    <td className="px-5 py-3 text-xs text-navy/60">
+                      {formatWait(e.wait_minutes)}
+                    </td>
+                    <td className="px-5 py-3">
+                      {nextStatus && (
+                        <button
+                          onClick={() => handleAdvance(e)}
+                          disabled={isUpdating}
+                          className="inline-flex items-center gap-1 rounded-lg border border-navy/15 px-3 py-1.5 text-xs text-navy transition-colors hover:bg-navy/5 cursor-pointer disabled:opacity-50"
+                        >
+                          {isUpdating ? (
+                            <span className="animate-pulse">Updating…</span>
+                          ) : (
+                            <>→ {STATUS_LABELS[nextStatus]}</>
+                          )}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

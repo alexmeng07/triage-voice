@@ -54,6 +54,23 @@ def _row_to_dict(row) -> dict[str, Any]:
     return dict(row)
 
 
+def _compute_wait_minutes(arrival_time: str | None) -> int | None:
+    """Compute minutes elapsed since arrival_time. Returns None if invalid."""
+    if not arrival_time:
+        return None
+    try:
+        # Handle ISO strings with or without 'Z' suffix
+        ts = arrival_time.replace("Z", "+00:00")
+        arrived = datetime.fromisoformat(ts)
+        if arrived.tzinfo is None:
+            arrived = arrived.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = now - arrived
+        return max(0, int(delta.total_seconds() / 60))
+    except (ValueError, TypeError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Patient CRUD
 # ---------------------------------------------------------------------------
@@ -221,9 +238,17 @@ def create_visit(
     pain_score: int | None = None,
     onset: str | None = None,
     symptom_location: str | None = None,
+    status: str = "triaged",
+    arrival_time: str | None = None,
+    triage_time: str | None = None,
 ) -> dict[str, Any]:
-    """Insert a new visit row and return it as a dict."""
+    """Insert a new visit row and return it as a dict.
+
+    For triage visits: status='triaged', arrival_time and triage_time set to now.
+    """
     now = _now_iso()
+    arr = arrival_time if arrival_time else now
+    tri = triage_time if triage_time else (now if esi_level is not None else None)
 
     conn = get_connection()
     try:
@@ -232,13 +257,13 @@ def create_visit(
             INSERT INTO visits (patient_id, chief_complaint, triage_note,
                                 esi_level, triage_method, triage_summary,
                                 recommended_action, pain_score, onset,
-                                symptom_location, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                symptom_location, status, arrival_time, triage_time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (patient_id, chief_complaint, triage_note,
              esi_level, triage_method, triage_summary,
              recommended_action, pain_score, onset,
-             symptom_location, now),
+             symptom_location, status, arr, tri, now),
         )
         conn.commit()
         visit_id = cursor.lastrowid
@@ -294,6 +319,79 @@ def list_visits_for_patient(patient_id: int) -> list[dict[str, Any]]:
             (patient_id,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Queue (visit-centric)
+# ---------------------------------------------------------------------------
+
+def list_active_queue_visits() -> list[dict[str, Any]]:
+    """Return visits with status != 'complete', sorted by acuity then arrival.
+
+    Order: lower ESI first (higher acuity), then older arrival_time.
+    Visits with null ESI are placed after those with known acuity.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT v.id AS visit_id, v.patient_id, v.chief_complaint, v.esi_level,
+                   v.status, v.arrival_time, v.triage_time, v.created_at,
+                   p.first_name, p.last_name, p.date_of_birth
+            FROM visits v
+            JOIN patients p ON p.id = v.patient_id
+            WHERE v.status != 'complete'
+            ORDER BY
+                CASE WHEN v.esi_level IS NULL THEN 6 ELSE v.esi_level END ASC,
+                v.arrival_time ASC
+            """
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = _row_to_dict(r)
+            d["patient_name"] = f"{d['first_name']} {d['last_name']}"
+            d["wait_minutes"] = _compute_wait_minutes(d.get("arrival_time"))
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def update_visit_status(visit_id: int, status: str) -> dict[str, Any] | None:
+    """Update a visit's status. Returns the updated row or None if not found."""
+    valid_statuses = {"waiting", "in_triage", "triaged", "with_doctor", "complete"}
+    if status not in valid_statuses:
+        return None
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE visits SET status = ? WHERE id = ?", (status, visit_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_queue_summary() -> dict[str, int]:
+    """Return aggregate counts: waiting, in_triage, triaged, with_doctor."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT status, COUNT(*) AS count
+            FROM visits
+            WHERE status != 'complete'
+            GROUP BY status
+            """
+        ).fetchall()
+        summary = {"waiting": 0, "in_triage": 0, "triaged": 0, "with_doctor": 0}
+        for r in rows:
+            s = r["status"]
+            if s in summary:
+                summary[s] = r["count"]
+        return summary
     finally:
         conn.close()
 
@@ -445,6 +543,41 @@ def list_training_cases() -> list[dict[str, Any]]:
     try:
         rows = conn.execute("SELECT * FROM training_cases ORDER BY id").fetchall()
         return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_training_cases_with_attempts() -> list[dict[str, Any]]:
+    """Return all training cases with their latest attempt (engine_esi, matched).
+
+    Each case dict includes last_engine_esi and last_matched (both None if
+    no attempts yet).
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT tc.*,
+                   (SELECT ta.engine_esi FROM training_attempts ta
+                    WHERE ta.case_id = tc.id
+                    ORDER BY ta.created_at DESC LIMIT 1) AS last_engine_esi,
+                   (SELECT ta.matched FROM training_attempts ta
+                    WHERE ta.case_id = tc.id
+                    ORDER BY ta.created_at DESC LIMIT 1) AS last_matched
+            FROM training_cases tc
+            ORDER BY tc.id
+            """
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = _row_to_dict(r)
+            # SQLite returns None for missing subquery results
+            if d.get("last_engine_esi") is None:
+                d["last_engine_esi"] = None
+            if d.get("last_matched") is None:
+                d["last_matched"] = None
+            result.append(d)
+        return result
     finally:
         conn.close()
 

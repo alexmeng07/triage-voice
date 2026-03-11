@@ -145,6 +145,10 @@ _VISITS_MIGRATIONS: list[tuple[str, str]] = [
     ("reviewed_role", "TEXT"),
     ("final_esi_level", "INTEGER"),
     ("disposition", "TEXT"),
+    # Phase 1 — Queue: visit-level status and timestamps
+    ("status", "TEXT NOT NULL DEFAULT 'triaged'"),
+    ("arrival_time", "TEXT"),
+    ("triage_time", "TEXT"),
 ]
 
 
@@ -169,6 +173,14 @@ def init_db() -> None:
 
         for col_name, col_type in _VISITS_MIGRATIONS:
             _safe_add_column(conn, "visits", col_name, col_type)
+
+        # Backfill arrival_time/triage_time for existing visits (backward compat)
+        conn.execute(
+            "UPDATE visits SET arrival_time = created_at WHERE arrival_time IS NULL"
+        )
+        conn.execute(
+            "UPDATE visits SET triage_time = created_at WHERE triage_time IS NULL AND esi_level IS NOT NULL"
+        )
 
         conn.commit()
         logger.info("Database initialized at %s", DB_PATH)

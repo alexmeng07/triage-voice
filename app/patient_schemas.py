@@ -124,6 +124,9 @@ class VisitResponse(BaseModel):
     reviewed_role: str | None = None
     final_esi_level: int | None = None
     disposition: str | None = None
+    status: str | None = None
+    arrival_time: str | None = None
+    triage_time: str | None = None
     created_at: str
 
 
@@ -134,3 +137,38 @@ class TriageVisitResponse(BaseModel):
     """
     visit: VisitResponse
     triage: TriageResponse
+
+
+# ---------------------------------------------------------------------------
+# Queue (visit-centric)
+# ---------------------------------------------------------------------------
+
+class QueueVisitResponse(BaseModel):
+    """A visit in the active queue (GET /queue)."""
+    visit_id: int
+    patient_id: int
+    patient_name: str
+    date_of_birth: str
+    chief_complaint: str | None = None
+    esi_level: int | None = None
+    status: str
+    arrival_time: str | None = None
+    triage_time: str | None = None
+    wait_minutes: int | None = None
+
+
+VALID_QUEUE_STATUSES = {"waiting", "in_triage", "triaged", "with_doctor", "complete"}
+
+
+class VisitStatusUpdateRequest(BaseModel):
+    """Body for PATCH /visits/{visit_id}/status."""
+    status: str = Field(..., description="One of: waiting, in_triage, triaged, with_doctor, complete")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in VALID_QUEUE_STATUSES:
+            raise ValueError(
+                f"status must be one of: {', '.join(sorted(VALID_QUEUE_STATUSES))}"
+            )
+        return v

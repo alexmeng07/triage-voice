@@ -40,16 +40,20 @@ from app.patient_repository import (
     get_common_complaints,
     get_esi_distribution,
     get_patient_by_id,
+    get_queue_summary,
     get_training_case_by_id,
     get_training_stats,
     get_visit_by_id,
+    list_active_queue_visits,
     list_audit_entries,
     list_todays_patients_with_visits,
     list_training_cases,
+    list_training_cases_with_attempts,
     list_visits_for_patient,
     lookup_patients,
     search_patients,
     update_visit_review,
+    update_visit_status,
 )
 from app.patient_schemas import (
     CreatePatientRequest,
@@ -57,10 +61,12 @@ from app.patient_schemas import (
     PatientLookupRequest,
     PatientLookupResponse,
     PatientResponse,
+    QueueVisitResponse,
     RegisterPatientResponse,
     TriageVisitResponse,
     VisitReviewRequest,
     VisitResponse,
+    VisitStatusUpdateRequest,
 )
 
 load_dotenv()
@@ -281,8 +287,55 @@ async def patient_lookup(req: PatientLookupRequest) -> PatientLookupResponse:
 
 @app.get("/patients/queue")
 async def patient_queue():
-    """Return today's patients with their latest visit info for the arrival board."""
+    """Return today's patients with their latest visit info (legacy, patient-centric)."""
     return list_todays_patients_with_visits()
+
+
+# ---------------------------------------------------------------------------
+# QUEUE (visit-centric)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/queue", response_model=list[QueueVisitResponse])
+async def get_queue() -> list[QueueVisitResponse]:
+    """Return active visits (status != complete), sorted by acuity then arrival."""
+    rows = list_active_queue_visits()
+    return [QueueVisitResponse(
+        visit_id=r["visit_id"],
+        patient_id=r["patient_id"],
+        patient_name=r["patient_name"],
+        date_of_birth=r["date_of_birth"],
+        chief_complaint=r.get("chief_complaint"),
+        esi_level=r.get("esi_level"),
+        status=r["status"],
+        arrival_time=r.get("arrival_time"),
+        triage_time=r.get("triage_time"),
+        wait_minutes=r.get("wait_minutes"),
+    ) for r in rows]
+
+
+@app.get("/queue/summary")
+async def get_queue_summary_route():
+    """Return aggregate counts: waiting, in_triage, triaged, with_doctor."""
+    return get_queue_summary()
+
+
+@app.patch("/visits/{visit_id}/status", response_model=VisitResponse)
+async def update_visit_status_route(
+    visit_id: int,
+    req: VisitStatusUpdateRequest,
+) -> VisitResponse:
+    """Update a visit's queue status."""
+    updated = update_visit_status(visit_id, req.status)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Visit {visit_id} not found")
+    create_audit_entry(
+        "visit_status_updated",
+        patient_id=updated["patient_id"],
+        visit_id=visit_id,
+        metadata=req.status,
+    )
+    return VisitResponse(**updated)
 
 
 @app.get("/patients/{patient_id}", response_model=PatientResponse)
@@ -385,8 +438,38 @@ async def review_visit(visit_id: int, req: VisitReviewRequest) -> VisitResponse:
 
 @app.get("/training/cases")
 async def list_cases():
-    """List all training case metadata."""
-    return list_training_cases()
+    """List all training cases with latest attempt (engine_esi, matched) per case."""
+    return list_training_cases_with_attempts()
+
+
+@app.post("/training/cases/triage-all")
+async def triage_all_cases():
+    """Run triage on every training case, record attempts, and return results."""
+    cases = list_training_cases()
+    if not cases:
+        return {"results": [], "total": 0, "matched": 0}
+    results = []
+    matched_count = 0
+    for case in cases:
+        triage_result = triage(case["transcript"])
+        attempt = create_training_attempt(
+            case_id=case["id"],
+            engine_esi=triage_result.esi_level,
+            expected_esi=case["target_esi"],
+        )
+        matched_count += attempt["matched"]
+        results.append({
+            "case_id": case["id"],
+            "title": case["title"],
+            "target_esi": case["target_esi"],
+            "engine_esi": triage_result.esi_level,
+            "matched": attempt["matched"],
+        })
+    return {
+        "results": results,
+        "total": len(results),
+        "matched": matched_count,
+    }
 
 
 @app.get("/training/cases/{case_id}")

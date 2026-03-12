@@ -15,6 +15,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from rapidfuzz import fuzz
+
 from app.database import get_connection
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,188 @@ def search_patients(query: str) -> list[dict[str, Any]]:
             (q, q, q),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy patient search (Phase 3)
+# ---------------------------------------------------------------------------
+
+FUZZY_THRESHOLD = 65  # minimum token_sort_ratio to include in results
+
+
+def _fuzzy_score_patient(
+    patient: dict[str, Any],
+    query: str,
+    query_phone: str | None,
+) -> tuple[int, str] | None:
+    """Score a patient against a search query.
+
+    Returns (score, match_reason) or None if below threshold.
+    Score range 0–100; higher is better.
+    """
+    q_lower = query.strip().lower()
+    if not q_lower:
+        return None
+
+    # Exact phone match is strongest
+    if query_phone and patient.get("phone") == query_phone:
+        return 100, "exact_phone"
+
+    full_name = f"{patient['first_name']} {patient['last_name']}".lower()
+    last_first = f"{patient['last_name']} {patient['first_name']}".lower()
+
+    # Exact full name match
+    if q_lower == full_name or q_lower == last_first:
+        return 100, "exact_name"
+
+    # Exact last name match
+    if q_lower == patient["last_name"].lower():
+        return 95, "exact_last_name"
+
+    # Exact first name match
+    if q_lower == patient["first_name"].lower():
+        return 90, "exact_first_name"
+
+    # Fuzzy name match (token_sort_ratio handles word order, partial names)
+    name_score = max(
+        fuzz.token_sort_ratio(q_lower, full_name),
+        fuzz.token_sort_ratio(q_lower, last_first),
+        fuzz.partial_ratio(q_lower, full_name),
+    )
+
+    if name_score >= FUZZY_THRESHOLD:
+        reason = "fuzzy_name"
+        if name_score >= 90:
+            reason = "strong_name_match"
+        return int(name_score), reason
+
+    return None
+
+
+def search_patients_fuzzy(query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Search patients with fuzzy name matching and ranked results.
+
+    Returns patient dicts augmented with `match_score` and `match_reason`.
+    Results sorted by score descending.
+    """
+    query = query.strip()
+    if not query:
+        return []
+
+    query_phone = _normalize_phone(query)
+
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM patients").fetchall()
+        candidates: list[tuple[int, str, dict[str, Any]]] = []
+
+        for row in rows:
+            patient = _row_to_dict(row)
+            result = _fuzzy_score_patient(patient, query, query_phone)
+            if result:
+                score, reason = result
+                candidates.append((score, reason, patient))
+
+        # Also include SQL LIKE matches that fuzzy may have missed
+        like_q = f"%{query}%"
+        like_rows = conn.execute(
+            """SELECT * FROM patients
+               WHERE first_name LIKE ? OR last_name LIKE ? OR phone LIKE ?""",
+            (like_q, like_q, like_q),
+        ).fetchall()
+        seen_ids = {c[2]["id"] for c in candidates}
+        for row in like_rows:
+            patient = _row_to_dict(row)
+            if patient["id"] not in seen_ids:
+                candidates.append((FUZZY_THRESHOLD, "substring", patient))
+                seen_ids.add(patient["id"])
+
+        candidates.sort(key=lambda c: c[0], reverse=True)
+
+        results = []
+        for score, reason, patient in candidates[:limit]:
+            patient["match_score"] = score
+            patient["match_reason"] = reason
+            results.append(patient)
+
+        return results
+    finally:
+        conn.close()
+
+
+def check_fuzzy_duplicates(
+    first_name: str,
+    last_name: str,
+    date_of_birth: str,
+    phone: str | None = None,
+) -> list[dict[str, Any]]:
+    """Check for exact and fuzzy duplicate patients before registration.
+
+    Returns candidates augmented with `match_score` and `match_reason`.
+    Stricter than general search — requires either:
+      - exact name + DOB  (score 100)
+      - exact phone       (score 100)
+      - fuzzy name + same DOB (score 80+)
+      - fuzzy name match alone (score 85+)
+    """
+    first_name = _normalize_name(first_name)
+    last_name = _normalize_name(last_name)
+    phone_norm = _normalize_phone(phone)
+    full_name = f"{first_name} {last_name}".lower()
+
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM patients").fetchall()
+        candidates: list[tuple[int, str, dict[str, Any]]] = []
+        seen_ids: set[int] = set()
+
+        for row in rows:
+            p = _row_to_dict(row)
+            pid = p["id"]
+            p_full = f"{p['first_name']} {p['last_name']}".lower()
+            same_dob = p["date_of_birth"] == date_of_birth
+
+            # Exact name + DOB
+            if p_full == full_name and same_dob:
+                if pid not in seen_ids:
+                    candidates.append((100, "exact_name_dob", p))
+                    seen_ids.add(pid)
+                continue
+
+            # Exact phone
+            if phone_norm and p.get("phone") == phone_norm:
+                if pid not in seen_ids:
+                    candidates.append((100, "exact_phone", p))
+                    seen_ids.add(pid)
+                continue
+
+            # Fuzzy name scoring
+            name_score = max(
+                fuzz.token_sort_ratio(full_name, p_full),
+                fuzz.ratio(full_name, p_full),
+            )
+
+            # Fuzzy name + same DOB — lower threshold since DOB anchors
+            if same_dob and name_score >= 75 and pid not in seen_ids:
+                candidates.append((int(name_score), "fuzzy_name_dob", p))
+                seen_ids.add(pid)
+                continue
+
+            # Fuzzy name alone — higher threshold
+            if name_score >= 85 and pid not in seen_ids:
+                candidates.append((int(name_score), "fuzzy_name", p))
+                seen_ids.add(pid)
+
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        results = []
+        for score, reason, patient in candidates:
+            patient["match_score"] = score
+            patient["match_reason"] = reason
+            results.append(patient)
+
+        return results
     finally:
         conn.close()
 

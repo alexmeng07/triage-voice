@@ -15,6 +15,7 @@ from app.triage_rules import (
     _check_esi_2,
     _build_summary,
     _build_recommended_action,
+    _extract_reported_symptoms,
     triage_from_transcript,
 )
 from app import ml_model
@@ -80,11 +81,12 @@ def triage(text: str) -> TriageResult:
         return triage_from_transcript(text)
 
     esi, confidence = _apply_up_triage_bias(probas)
+    detected = _extract_reported_symptoms(text)
 
     return TriageResult(
         esi_level=esi,
-        red_flags=[],
-        summary=_build_summary(text, esi, []),
+        red_flags=detected,
+        summary=_build_summary(text, esi, detected),
         recommended_action=_build_recommended_action(esi),
         confidence=confidence,
         method="ml",

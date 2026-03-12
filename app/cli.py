@@ -1,4 +1,5 @@
 import argparse
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -69,13 +70,20 @@ def transcribe_wav(wav_path: str) -> str:
     return transcribe_wav_file(wav_path)
 
 
+def _highlight_quoted(text: str) -> str:
+    """Wrap text inside double quotes with ANSI cyan."""
+    CYAN = "\033[36m"
+    RESET = "\033[0m"
+    return re.sub(r'"([^"]+)"', f'{CYAN}"\\1"{RESET}', text)
+
+
 def print_result(result: TriageResult) -> None: 
     print("\n--- CHECKPOINT C: TRIAGE RESULT ---")
     print(f"ESI Level: {result.esi_level}")
     if result.method != "rule":
         print(f"Method: {result.method} (confidence: {result.confidence:.0%})")
     print(f"Red flags: {result.red_flags if result.red_flags else '(none)'}")
-    print(f"Summary: {result.summary}")
+    print(f"Summary: {_highlight_quoted(result.summary)}")
     print(f"Recommended action: {result.recommended_action}")
     print(f"Disclaimer: {result.disclaimer}")
 

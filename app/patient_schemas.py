@@ -68,20 +68,33 @@ class PatientResponse(BaseModel):
 PatientMatch = PatientResponse
 
 
+class FuzzyPatientMatch(PatientResponse):
+    """Patient record augmented with match quality metadata."""
+    match_score: int = 0
+    match_reason: str = "exact"
+
+
 class PatientLookupResponse(BaseModel):
     """Wrapper returned from POST /patients/lookup."""
     matches: list[PatientMatch]
     count: int
 
 
+class FuzzySearchResponse(BaseModel):
+    """Wrapper returned from GET /patients/search with fuzzy matching."""
+    matches: list[FuzzyPatientMatch]
+    count: int
+
+
 class RegisterPatientResponse(BaseModel):
     """Returned from POST /patients/register.
 
-    Includes the created patient plus an optional duplicate warning.
+    Includes the created patient plus an optional duplicate warning
+    with fuzzy match scores.
     """
     patient: PatientResponse
     duplicate_warning: str | None = None
-    duplicates: list[PatientResponse] = []
+    duplicates: list[FuzzyPatientMatch] = []
 
 
 # ---------------------------------------------------------------------------

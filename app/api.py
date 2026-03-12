@@ -33,6 +33,7 @@ from app.triage_engine import triage
 from app.database import init_db
 from app.patient_repository import (
     check_duplicate_patient,
+    check_fuzzy_duplicates,
     create_audit_entry,
     create_patient,
     create_training_attempt,
@@ -52,12 +53,15 @@ from app.patient_repository import (
     list_visits_for_patient,
     lookup_patients,
     search_patients,
+    search_patients_fuzzy,
     update_visit_review,
     update_visit_status,
 )
 from app.patient_schemas import (
     CreatePatientRequest,
     CreateVisitRequest,
+    FuzzyPatientMatch,
+    FuzzySearchResponse,
     PatientLookupRequest,
     PatientLookupResponse,
     PatientResponse,
@@ -227,14 +231,18 @@ async def version() -> VersionResponse:
 # so FastAPI doesn't try to treat "search" as a patient_id integer.
 
 
-@app.get("/patients/search", response_model=PatientLookupResponse)
+@app.get("/patients/search", response_model=FuzzySearchResponse)
 async def patient_search(
     q: str = Query(..., min_length=1, description="Free-text search for patients"),
-) -> PatientLookupResponse:
-    """Convenience search: matches query against first_name, last_name, or phone."""
-    matches = search_patients(q)
-    return PatientLookupResponse(
-        matches=[PatientResponse(**m) for m in matches],
+) -> FuzzySearchResponse:
+    """Search patients with fuzzy name matching and ranked results.
+
+    Returns matches with match_score (0-100) and match_reason indicating
+    how the result was matched (exact_name, exact_phone, fuzzy_name, etc).
+    """
+    matches = search_patients_fuzzy(q)
+    return FuzzySearchResponse(
+        matches=[FuzzyPatientMatch(**m) for m in matches],
         count=len(matches),
     )
 
@@ -243,20 +251,25 @@ async def patient_search(
 async def register_patient(req: CreatePatientRequest) -> RegisterPatientResponse:
     """Create a new patient record.
 
-    Returns the created patient.  If a patient with the same name + DOB
-    already exists, a duplicate_warning is included (but the patient is
-    still created — this is just an informational heads-up).
+    Uses fuzzy matching to detect potential duplicates.  If any are found,
+    a duplicate_warning is included along with scored match candidates
+    (but the patient is still created — this is just an informational heads-up).
     """
-    dupes = check_duplicate_patient(req.first_name, req.last_name, req.date_of_birth)
+    dupes = check_fuzzy_duplicates(
+        req.first_name, req.last_name, req.date_of_birth, req.phone,
+    )
     warning: str | None = None
-    dupe_records: list[PatientResponse] = []
+    dupe_records: list[FuzzyPatientMatch] = []
     if dupes:
-        ids = ", ".join(str(d["id"]) for d in dupes)
-        warning = (
-            f"Possible duplicate(s) found with same name and DOB "
-            f"(existing patient IDs: {ids}). Patient was still created."
-        )
-        dupe_records = [PatientResponse(**d) for d in dupes]
+        exact = [d for d in dupes if d.get("match_score", 0) == 100]
+        fuzzy = [d for d in dupes if d.get("match_score", 0) < 100]
+        parts = []
+        if exact:
+            parts.append(f"{len(exact)} exact match(es)")
+        if fuzzy:
+            parts.append(f"{len(fuzzy)} similar record(s)")
+        warning = f"Possible duplicate(s) found: {' and '.join(parts)}. Patient was still created."
+        dupe_records = [FuzzyPatientMatch(**d) for d in dupes]
 
     patient = create_patient(
         first_name=req.first_name,

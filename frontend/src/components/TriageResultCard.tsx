@@ -96,6 +96,23 @@ function HighAcuityAlert({ triage }: { triage: TriageVisitResponse["triage"] }) 
   );
 }
 
+function SummaryWithHighlight({ text }: { text: string }) {
+  const parts = text.split(/("[^"]+")/);
+  return (
+    <p className="text-sm text-navy/80">
+      {parts.map((part, i) =>
+        part.startsWith('"') && part.endsWith('"') ? (
+          <span key={i} className="text-teal-700 font-medium">
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </p>
+  );
+}
+
 export default function TriageResultCard({
   result,
   patientId,
@@ -150,7 +167,7 @@ export default function TriageResultCard({
 
         <div>
           <p className="text-xs font-medium text-navy/50 mb-1">Summary</p>
-          <p className="text-sm text-navy/80">{triage.summary}</p>
+          <SummaryWithHighlight text={triage.summary} />
         </div>
 
         <div>

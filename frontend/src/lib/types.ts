@@ -14,15 +14,25 @@ export interface PatientResponse {
   updated_at: string;
 }
 
+export interface FuzzyPatientMatch extends PatientResponse {
+  match_score: number;
+  match_reason: string;
+}
+
 export interface PatientLookupResponse {
   matches: PatientResponse[];
+  count: number;
+}
+
+export interface FuzzySearchResponse {
+  matches: FuzzyPatientMatch[];
   count: number;
 }
 
 export interface RegisterPatientResponse {
   patient: PatientResponse;
   duplicate_warning: string | null;
-  duplicates: PatientResponse[];
+  duplicates: FuzzyPatientMatch[];
 }
 
 export interface VisitResponse {

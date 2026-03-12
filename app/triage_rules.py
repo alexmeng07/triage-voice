@@ -154,6 +154,33 @@ ZERO_RESOURCES = [
     (r"\bprescription\s+refill\b", "prescription refill"),
 ]
 
+# Additional common symptom patterns not covered by the ESI / resource lists
+ADDITIONAL_SYMPTOM_PATTERNS: List[Tuple[str, str]] = [
+    (r"\bheadache\b", "headache"),
+    (r"\bdizz(?:y|iness)\b", "dizziness"),
+    (r"\bnausea\b", "nausea"),
+    (r"\bvomit(?:ing)?\b", "vomiting"),
+    (r"\bcough(?:ing)?\b", "cough"),
+    (r"\bback\s+pain\b", "back pain"),
+    (r"\bjoint\s+pain\b", "joint pain"),
+    (r"\bswell(?:ing|ed|olen)\b", "swelling"),
+    (r"\bnumb(?:ness)?\b", "numbness"),
+    (r"\btingling\b", "tingling"),
+    (r"\bfatigue\b|\bexhausted\b", "fatigue"),
+    (r"\bdiarrhea\b", "diarrhea"),
+    (r"\bconstipation\b", "constipation"),
+    (r"\bfever\b", "fever"),
+    (r"\bchills?\b", "chills"),
+    (r"\bshortness\s+of\s+breath\b", "shortness of breath"),
+    (r"\bblurr(?:y|ed)\s+vision\b", "blurry vision"),
+    (r"\btremor\b|\bshaking\b", "tremor"),
+    (r"\bpalpitation\b|\bheart\s+racing\b", "palpitations"),
+    (r"\bstomach\s*(?:ache|pain)\b", "stomach pain"),
+    (r"\bleg\s+pain\b", "leg pain"),
+    (r"\bneck\s+pain\b", "neck pain"),
+    (r"\bshoulder\s+pain\b", "shoulder pain"),
+]
+
 
 def _normalize(text: str) -> str:
     """Lowercase and strip."""
@@ -313,6 +340,76 @@ def _apply_severity_backstop(text: str, current_esi: int) -> Tuple[int, List[str
     return esi, flags
 
 
+def _extract_pain_level(text_norm: str) -> int | None:
+    """Extract a 0–10 pain or severity score from normalized text."""
+    for pattern in [
+        r"(?:pain|hurt|severity)\s*(?:is\s*)?(\d{1,2})\s*(?:out\s+of\s+10|/\s*10)",
+        r"(\d{1,2})\s*(?:out\s+of\s+10|/\s*10)\s*(?:pain|hurt)",
+        r"severity[:\s]+(\d{1,2})/10",
+    ]:
+        m = re.search(pattern, text_norm)
+        if m:
+            val = int(m.group(1))
+            if 0 <= val <= 10:
+                return val
+    return None
+
+
+def _extract_reported_symptoms(text: str) -> List[str]:
+    """Extract all clinically relevant symptoms detected in free text.
+
+    Scans ESI patterns, resource patterns, common symptom patterns, and
+    pain level.  Returns a deduplicated list ordered by clinical priority:
+    critical → high-risk → clinical → general.
+    """
+    text_norm = _normalize(text)
+    if not text_norm:
+        return []
+
+    critical: List[str] = []
+    high_risk: List[str] = []
+    clinical: List[str] = []
+    general: List[str] = []
+    seen: set = set()
+
+    def _add(label: str, bucket: List[str]) -> None:
+        key = label.lower()
+        if key not in seen:
+            seen.add(key)
+            bucket.append(label)
+
+    if _check_active_seizure(text):
+        _add("active seizure", critical)
+
+    if _check_pediatric_fever(text):
+        _add("infant <3mo with fever", critical)
+
+    for pattern, label in ESI_1_PATTERNS:
+        if re.search(pattern, text_norm, re.I):
+            _add(label, critical)
+
+    for pattern, label in ESI_2_PATTERNS:
+        if re.search(pattern, text_norm, re.I):
+            _add(label, high_risk)
+
+    if HIGH_FEVER_PATTERN.search(text_norm):
+        _add("high fever", high_risk)
+
+    for pattern, label in TWO_PLUS_RESOURCES + ONE_RESOURCE + ZERO_RESOURCES:
+        if re.search(pattern, text_norm, re.I):
+            _add(label, clinical)
+
+    for pattern, label in ADDITIONAL_SYMPTOM_PATTERNS:
+        if re.search(pattern, text_norm, re.I):
+            _add(label, general)
+
+    pain = _extract_pain_level(text_norm)
+    if pain is not None:
+        _add(f"{pain}/10 pain level", high_risk if pain >= 7 else general)
+
+    return critical + high_risk + clinical + general
+
+
 def _build_summary(transcript: str, esi: int, red_flags: List[str]) -> str:
     """One or two sentences summarizing the assessment."""
     transcript = (transcript or "").strip()
@@ -322,15 +419,17 @@ def _build_summary(transcript: str, esi: int, red_flags: List[str]) -> str:
             "Consider describing your symptoms in more detail."
         )
 
-    parts = ["Based on what you said, you reported "]
-    if red_flags:
-        parts.append(", ".join(red_flags))
-    else:
-        snippet = transcript[:100] + "..." if len(transcript) > 100 else transcript
-        parts.append(snippet)
+    symptoms = red_flags if red_flags else _extract_reported_symptoms(transcript)
 
-    parts.append(".")
-    return "".join(parts)
+    if symptoms:
+        symptom_text = ", ".join(symptoms)
+    else:
+        snippet = transcript[:80].rstrip()
+        if len(transcript) > 80:
+            snippet += "\u2026"
+        symptom_text = snippet
+
+    return f'Based on what you said, you reported "{symptom_text}".'
 
 
 def _build_recommended_action(esi: int) -> str:

@@ -1,5 +1,6 @@
 import type {
   PatientLookupResponse,
+  FuzzySearchResponse,
   PatientLookupRequest,
   PatientResponse,
   RegisterPatientResponse,
@@ -48,7 +49,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ── Patient endpoints ───────────────────────────────────────────────────
 
-export async function searchPatients(q: string): Promise<PatientLookupResponse> {
+export async function searchPatients(q: string): Promise<FuzzySearchResponse> {
   return request(`/patients/search?q=${encodeURIComponent(q)}`);
 }
 

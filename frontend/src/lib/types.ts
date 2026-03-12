@@ -62,6 +62,11 @@ export interface TriageVisitResponse {
   triage: TriageResponse;
 }
 
+/** Response from POST /triage/audio — transcript + triage (no visit created). */
+export interface AudioTriageResponse extends TriageResponse {
+  transcript: string;
+}
+
 // ── Request types ───────────────────────────────────────────────────────
 
 export interface CreatePatientRequest {

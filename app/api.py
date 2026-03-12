@@ -83,8 +83,27 @@ ALLOWED_AUDIO_TYPES = {
     "audio/mp3",
     "audio/ogg",
     "audio/webm",
+    "audio/webm;codecs=opus",
+    "audio/webm;codecs=opus,vorbis",
     "audio/flac",
+    "audio/mp4",
+    "audio/x-m4a",
 }
+
+
+def _is_allowed_audio_type(content_type: str | None) -> bool:
+    """Accept exact matches and variants like audio/webm;codecs=opus (with/without space)."""
+    if not content_type:
+        return True
+    ct = content_type.strip().split(";")[0].strip().lower()
+    if content_type in ALLOWED_AUDIO_TYPES:
+        return True
+    # Accept audio/webm* and audio/mp4* (codec params vary by browser)
+    if ct in ("audio/webm", "audio/mp4") or content_type.lower().startswith(
+        ("audio/webm", "audio/mp4")
+    ):
+        return True
+    return False
 
 # ---------------------------------------------------------------------------
 # Lifespan — runs once on startup/shutdown
@@ -159,7 +178,7 @@ async def triage_text(req: TriageRequest) -> TriageResponse:
 
 @app.post("/triage/audio", response_model=AudioTriageResponse)
 async def triage_audio(file: UploadFile) -> AudioTriageResponse:
-    if file.content_type and file.content_type not in ALLOWED_AUDIO_TYPES:
+    if not _is_allowed_audio_type(file.content_type):
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported content type '{file.content_type}'. Expected audio file.",
@@ -393,6 +412,69 @@ async def create_triage_visit(patient_id: int, req: CreateVisitRequest) -> Triag
     )
 
     create_audit_entry("triage_visit_created", patient_id=patient_id, visit_id=visit["id"])
+
+    return TriageVisitResponse(
+        visit=VisitResponse(**visit),
+        triage=TriageResponse(**triage_result.to_dict()),
+    )
+
+
+@app.post("/patients/{patient_id}/triage-audio-visit", response_model=TriageVisitResponse)
+async def create_triage_visit_from_audio(
+    patient_id: int,
+    file: UploadFile,
+) -> TriageVisitResponse:
+    """Record a triage visit from an audio upload for an existing patient.
+
+    Flow:
+    1. Confirm the patient exists.
+    2. Transcribe the audio via speech-to-text.
+    3. Run the triage engine on the transcript.
+    4. Store a new visit with the triage results.
+    5. Return the visit record and triage output.
+    """
+    patient = get_patient_by_id(patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail=f"Patient {patient_id} not found")
+
+    if not _is_allowed_audio_type(file.content_type):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported content type '{file.content_type}'. Expected audio file.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    try:
+        transcript = transcribe_wav_bytes(data, filename=file.filename or "upload.wav")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=f"STT failed: {exc}") from exc
+
+    if not transcript or not transcript.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="STT returned empty transcript — audio may be silent or unrecognizable",
+        )
+
+    triage_result = triage(transcript)
+    visit = create_visit(
+        patient_id=patient_id,
+        chief_complaint=transcript,
+        triage_note=transcript,
+        esi_level=triage_result.esi_level,
+        triage_method=triage_result.method,
+        triage_summary=triage_result.summary,
+        recommended_action=triage_result.recommended_action,
+    )
+
+    create_audit_entry(
+        "triage_visit_created",
+        patient_id=patient_id,
+        visit_id=visit["id"],
+        metadata="audio",
+    )
 
     return TriageVisitResponse(
         visit=VisitResponse(**visit),

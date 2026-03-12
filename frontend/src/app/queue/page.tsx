@@ -132,7 +132,7 @@ export default function QueuePage() {
         </button>
       </div>
 
-      {summary && totalActive !== undefined && totalActive > 0 && (
+      {summary && totalActive != null && totalActive > 0 && (
         <div className="flex flex-wrap gap-4 text-sm">
           <span className="text-navy/60">
             Waiting: <strong className="text-navy">{summary.waiting}</strong>

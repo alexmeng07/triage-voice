@@ -34,6 +34,8 @@ Override with the `NEXT_PUBLIC_API_URL` environment variable (see `frontend/.env
 
 **Queue page:** `/queue` — View active visits by acuity, update status (waiting → in_triage → triaged → with_doctor → complete).
 
+**Triage page (audio):** On `/patients/[id]/triage`, you can record or upload an audio file of the patient complaint. The app transcribes it via speech-to-text and runs triage, creating a visit in one step.
+
 ---
 
 ## API Reference
@@ -70,7 +72,8 @@ Override with the `NEXT_PUBLIC_API_URL` environment variable (see `frontend/.env
 | POST | `/patients/lookup` | Structured patient lookup |
 | GET | `/patients/{patient_id}` | Get patient by ID |
 | GET | `/patients/{patient_id}/visits` | List visits for a patient |
-| POST | `/patients/{patient_id}/triage-visit` | Run triage and create a visit |
+| POST | `/patients/{patient_id}/triage-visit` | Run triage and create a visit (text) |
+| POST | `/patients/{patient_id}/triage-audio-visit` | Run triage from audio and create a visit |
 | GET | `/patients/queue` | *(Legacy)* Today's patients with latest visit (use `/queue` for visit-centric) |
 
 ---
@@ -217,7 +220,7 @@ Run the triage engine on a transcript/note and create a visit record.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated allowed origins |
-| `ELEVENLABS_API_KEY` | — | Required only for `/triage/audio` (speech-to-text) |
+| `ELEVENLABS_API_KEY` | — | Required for `/triage/audio` and `/patients/{id}/triage-audio-visit` (ElevenLabs speech-to-text) |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Frontend: backend API base URL |
 
 ---
@@ -231,6 +234,18 @@ python -m scripts.seed_patients
 Inserts 4 patients (Jane Doe, John Smith, Maria Garcia, Robert Chen) and 2 sample visits. Safe to run multiple times.
 
 Seeded visits are created with `status=triaged` and will appear in the queue at `/queue` until moved to `complete`.
+
+---
+
+## Testing Audio Triage
+
+1. Ensure `ELEVENLABS_API_KEY` is set in `.env`.
+2. Start the backend (`python api_server.py`) and frontend (`cd frontend && npm run dev`).
+3. Go to `/patients` and select or register a patient.
+4. Open the triage page for that patient (`/patients/[id]/triage`).
+5. Use **Record** to capture audio live (browser will ask for microphone access), or **Upload File** to select an audio file.
+6. Supported formats: WAV, MP3, OGG, WebM, FLAC.
+7. After processing, the transcript and triage result (ESI, summary, recommended action) are displayed and the visit is saved.
 
 ---
 

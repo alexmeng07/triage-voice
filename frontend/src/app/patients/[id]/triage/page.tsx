@@ -6,6 +6,7 @@ import { getPatient, createTriageVisit, ApiError } from "@/lib/api";
 import type { PatientResponse, TriageVisitResponse, CreateVisitRequest } from "@/lib/types";
 import PatientHeaderCard from "@/components/PatientHeaderCard";
 import TriageVisitForm from "@/components/TriageVisitForm";
+import AudioTriageForm from "@/components/AudioTriageForm";
 import TriageResultCard from "@/components/TriageResultCard";
 import { ArrowLeft } from "lucide-react";
 
@@ -97,7 +98,8 @@ export default function TriagePage({
               New Triage Visit
             </h2>
             <p className="mt-1 text-sm text-navy/60">
-              Enter the patient transcript or complaint below.
+              Enter the patient transcript or complaint below, or record/upload
+              audio.
             </p>
           </div>
 
@@ -108,6 +110,17 @@ export default function TriagePage({
           )}
 
           <TriageVisitForm onSubmit={handleSubmit} loading={submitting} />
+
+          <div className="border-t border-navy/10 pt-8 mt-8">
+            <h3 className="text-sm font-medium text-navy/70 mb-3">
+              Or use audio
+            </h3>
+            <AudioTriageForm
+              patientId={patientId}
+              onSubmit={(res) => setResult(res)}
+              loading={submitting}
+            />
+          </div>
         </>
       ) : (
         <TriageResultCard

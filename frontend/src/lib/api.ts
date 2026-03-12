@@ -8,6 +8,7 @@ import type {
   TriageVisitResponse,
   CreateVisitRequest,
   VisitReviewRequest,
+  AudioTriageResponse,
   TrainingCase,
   TrainingAttemptResult,
   TrainingStats,
@@ -85,6 +86,50 @@ export async function createTriageVisit(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * Triage from audio file (transcript + triage only, no visit).
+ * Use createTriageVisitFromAudio when on a patient page to save as visit.
+ */
+export async function triageAudio(file: File): Promise<AudioTriageResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/triage/audio`,
+    {
+      method: "POST",
+      body: formData,
+      headers: {}, // do not set Content-Type — browser sets multipart boundary
+    },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body?.detail ?? res.statusText);
+  }
+  return res.json();
+}
+
+/**
+ * Upload audio for triage and create a visit for the patient in one request.
+ */
+export async function createTriageVisitFromAudio(
+  patientId: number,
+  file: File,
+): Promise<TriageVisitResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/patients/${patientId}/triage-audio-visit`,
+    {
+      method: "POST",
+      body: formData,
+      headers: {},
+    },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body?.detail ?? res.statusText);
+  }
+  return res.json();
 }
 
 // ── Visit review ────────────────────────────────────────────────────────
